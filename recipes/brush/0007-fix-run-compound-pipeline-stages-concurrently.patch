@@ -1,0 +1,78 @@
+From 3164af344629aa06533fae7315b0283398055c36 Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Thu, 1 Oct 2026 17:00:53 +0200
+Subject: [PATCH 07/21] fix: run compound pipeline stages concurrently
+
+A compound command or function that is not the last pipeline stage was
+awaited to completion before the next stage started, so nothing read
+its pipe. Once its output exceeded the pipe buffer it blocked forever:
+64 KiB on Linux, but only 4 KiB on Windows, where configure's
+`(set) 2>&1 | sed ...` hung.
+
+Spawn such stages as tasks so they run alongside their readers.
+
+Assisted-by: Claude Code:claude-opus-5-5
+---
+ brush-core/src/interp.rs                     | 32 ++++++++++++++++++++
+ brush-shell/tests/cases/compat/pipeline.yaml |  8 +++++
+ 2 files changed, 40 insertions(+)
+
+diff --git a/brush-core/src/interp.rs b/brush-core/src/interp.rs
+index b2d342dd..f991e45d 100644
+--- a/brush-core/src/interp.rs
++++ b/brush-core/src/interp.rs
+@@ -495,6 +495,38 @@ async fn spawn_pipeline_processes(
+             cmd_params.open_files.set_fd(OpenFiles::STDOUT_FD, writer);
+         }
+ 
++        // A compound command or function runs inside this process, so awaiting it here
++        // would leave its pipe without a reader until it finishes; once its output
++        // exceeds the pipe buffer, it blocks forever. Run it concurrently instead.
++        if !run_in_current_shell
++            && current_pipeline_index + 1 < pipeline_len
++            && matches!(
++                command,
++                ast::Command::Compound(..) | ast::Command::Function(..)
++            )
++        {
++            let mut task_shell = shell.clone();
++            let task_command = command.clone();
++            let join_handle = tokio::spawn(async move {
++                let context = PipelineExecutionContext {
++                    shell: commands::ShellForCommand::ParentShell(&mut task_shell),
++                    process_group_id: None,
++                };
++                match task_command
++                    .execute_in_pipeline(context, cmd_params)
++                    .await?
++                {
++                    ExecutionSpawnResult::Completed(result) => Ok(result),
++                    spawned => match spawned.wait().await? {
++                        ExecutionWaitResult::Completed(result) => Ok(result),
++                        ExecutionWaitResult::Stopped(..) => Ok(ExecutionResult::stopped()),
++                    },
++                }
++            });
++            spawn_results.push_back(ExecutionSpawnResult::StartedTask(join_handle));
++            continue;
++        }
++
+         let pipeline_context = if !run_in_current_shell {
+             // Make sure that all commands in the pipeline are in the same process group.
+             if current_pipeline_index > 0 {
+diff --git a/brush-shell/tests/cases/compat/pipeline.yaml b/brush-shell/tests/cases/compat/pipeline.yaml
+index b7a4f555..22a74652 100644
+--- a/brush-shell/tests/cases/compat/pipeline.yaml
++++ b/brush-shell/tests/cases/compat/pipeline.yaml
+@@ -58,3 +58,11 @@ cases:
+     stdin: |
+       printf '%s\n' {0..10000} | x=1
+       echo "Last: $?, PIPESTATUS: ${PIPESTATUS[*]}"
++
++  # The first stage runs inside the shell; it must not wait for its reader to
++  # start. 20000 lines exceed a 64 KiB pipe buffer (4 KiB on Windows).
++  - name: "Compound pipeline stage writing more than a pipe buffer"
++    timeout_in_seconds: 60
++    stdin: |
++      { i=0; while [ $i -lt 20000 ]; do echo "line $i"; i=$((i + 1)); done; } |
++        { n=0; while read -r l; do n=$((n + 1)); done; echo "$n"; }

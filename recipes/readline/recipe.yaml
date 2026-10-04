@@ -1,0 +1,63 @@
+context:
+  version: "8.3.003"
+  base: "8.3"
+
+package:
+  name: readline
+  version: ${{ version }}
+
+source:
+  url: https://ftpmirror.gnu.org/gnu/readline/readline-${{ base }}.tar.gz
+  sha256: fe5383204467828cd495ee8d1d3c037a7eba1389c22bc6a041f627976f9061cc
+  patches:
+    # The official patches readline83-001 to -003, as unified diffs.
+    - 001-readline83-001.patch
+    - 002-readline83-002.patch
+    - 003-readline83-003.patch
+    # From MSYS2's mingw-w64-readline; 0001 and 0002 come from mxe-octave.
+    - 0001-sigwinch.patch
+    - 0002-event-hook.patch
+    - 0003-no-winsize.patch
+    - 0004-locale.patch
+
+build:
+  number: 5
+  script:
+    interpreter: brush
+    content:
+      # No rpath; spell out --export-all-symbols.
+      - sed -i -e 's|-Wl,-rpath,$(libdir) ||g' -e 's|-Wl,--export-all |-Wl,--export-all-symbols |g' support/shobj-conf
+      # NEED_EXTERN_PC: use the PC variable from libtermcap.
+      # __USE_MINGW_ALARM: mingw-w64 provides a dummy alarm().
+      # libgcc is linked statically: the toolchain's DLLs are not part of any
+      # environment.
+      - >-
+        ./configure --prefix="$PREFIX" --enable-shared --disable-static --without-curses
+        CC="gcc -static-libgcc" CFLAGS="-O2 -DNEED_EXTERN_PC=1 -D__USE_MINGW_ALARM -D_POSIX"
+        CPPFLAGS="-I$PREFIX/include" LDFLAGS="-L$PREFIX/lib"
+      - make -j"$(nproc)"
+      - make install
+
+requirements:
+  run_exports:
+    - ${{ pin_subpackage('readline', upper_bound='x') }}
+  build:
+    - posix-env
+  host:
+    - termcap
+    - gettext-runtime
+
+tests:
+  - package_contents:
+      files:
+        - bin/libreadline8.dll
+        - bin/libhistory8.dll
+        - lib/libreadline.dll.a
+        - lib/libhistory.dll.a
+        - include/readline/readline.h
+
+about:
+  homepage: https://tiswww.case.edu/php/chet/readline/rltop.html
+  license: GPL-3.0-or-later
+  license_file: COPYING
+  summary: GNU readline, line editing and history

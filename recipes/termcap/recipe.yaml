@@ -1,0 +1,59 @@
+context:
+  version: "1.3.1"
+
+package:
+  name: termcap
+  version: ${{ version }}
+
+source:
+  url: https://ftpmirror.gnu.org/gnu/termcap/termcap-${{ version }}.tar.gz
+  sha256: 91a0e22e5387ca4467b5bcb18edf1c51b930262fd466d5fda396dd9d26719100
+  patches:
+    # tparam.c: implicit declaration of write.  From MSYS2's mingw-w64-termcap.
+    - 0001-tparam-replace-write-with-fprintf.patch
+
+build:
+  number: 0
+  script:
+    interpreter: brush
+    content:
+      # configure is from Autoconf 1 and only defines these macros; MSYS2
+      # regenerates it.  Compile the three sources directly instead.  The
+      # sources are K&R C, which GCC 15+ rejects under its default C23.
+      - >-
+        gcc -O2 -std=gnu17 -DHAVE_STRING_H=1 -DHAVE_UNISTD_H=1 -DSTDC_HEADERS=1
+        -DTERMCAP_FILE='"/etc/termcap"' -c termcap.c tparam.c version.c
+      - >-
+        gcc -shared -static-libgcc -o libtermcap-0.dll termcap.o tparam.o version.o
+        -Wl,--out-implib,libtermcap.dll.a
+      - mkdir -p "$PREFIX/bin" "$PREFIX/lib/pkgconfig" "$PREFIX/include" "$PREFIX/share/info"
+      - cp libtermcap-0.dll "$PREFIX/bin/"
+      - cp libtermcap.dll.a "$PREFIX/lib/"
+      - cp termcap.h "$PREFIX/include/"
+      - cp termcap.info termcap.info-[1-4] "$PREFIX/share/info/"
+      - >-
+        printf '%s\n' "prefix=$PREFIX" 'exec_prefix=${prefix}' 'libdir=${exec_prefix}/lib'
+        'includedir=${prefix}/include' '' 'Name: Termcap'
+        'Description: GNU Termcap library'
+        "Version: ${PKG_VERSION}" 'Libs: -L${libdir} -ltermcap' 'Cflags: -I${includedir}'
+        > "$PREFIX/lib/pkgconfig/termcap.pc"
+
+requirements:
+  run_exports:
+    - ${{ pin_subpackage('termcap', upper_bound='x.x') }}
+  build:
+    - posix-env
+
+tests:
+  - package_contents:
+      files:
+        - bin/libtermcap-0.dll
+        - lib/libtermcap.dll.a
+        - lib/pkgconfig/termcap.pc
+        - include/termcap.h
+
+about:
+  homepage: https://www.gnu.org/software/termutils/
+  license: GPL-2.0-or-later
+  license_file: COPYING
+  summary: GNU termcap library

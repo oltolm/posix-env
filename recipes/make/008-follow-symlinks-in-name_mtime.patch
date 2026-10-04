@@ -1,0 +1,69 @@
+Subject: [PATCH] Follow symbolic links when reading file timestamps on Windows
+
+The CRT's stat reports a symbolic link's own times rather than those of the
+file it points to, unlike POSIX stat.  A target that is a symlink therefore
+looks out of date as soon as its source changes, so make reruns a rule such
+as `ln -s $< $@', which then fails because the link exists.
+
+Take the modification time from the link's target when NAME is a reparse
+point, and report a dangling link as nonexistent, as POSIX stat does.
+---
+diff --git a/src/remake.c b/src/remake.c
+--- a/src/remake.c
++++ b/src/remake.c
+@@ -43,6 +43,46 @@ this program.  If not, see <https://www.gnu.org/licenses/>.  */
+ #else
+ #define STAT stat
+ #endif
++
++/* The CRT's stat reports a symbolic link's own times rather than those of
++   the file it points to, as POSIX stat does, so a link would look out of
++   date whenever its target changes.  */
++static int
++stat_follow_links (const char *name, struct STAT *st)
++{
++  DWORD attrs;
++  HANDLE h;
++  FILETIME ft;
++  ULARGE_INTEGER t;
++
++  if (STAT (name, st) != 0)
++    return -1;
++
++  attrs = GetFileAttributesA (name);
++  if (attrs == INVALID_FILE_ATTRIBUTES
++      || !(attrs & FILE_ATTRIBUTE_REPARSE_POINT))
++    return 0;
++
++  /* CreateFile follows the link; a dangling one does not exist.  */
++  h = CreateFileA (name, 0, FILE_SHARE_READ | FILE_SHARE_WRITE
++                   | FILE_SHARE_DELETE, NULL, OPEN_EXISTING,
++                   FILE_FLAG_BACKUP_SEMANTICS, NULL);
++  if (h == INVALID_HANDLE_VALUE)
++    {
++      errno = ENOENT;
++      return -1;
++    }
++  if (GetFileTime (h, NULL, NULL, &ft))
++    {
++      t.LowPart = ft.dwLowDateTime;
++      t.HighPart = ft.dwHighDateTime;
++      /* FILETIME counts 100ns intervals since 1601-01-01.  */
++      st->st_mtime = (time_t) ((t.QuadPart - 116444736000000000ULL)
++                               / 10000000);
++    }
++  CloseHandle (h);
++  return 0;
++}
+ #endif
+ 
+ 
+@@ -1584,7 +1624,7 @@ name_mtime (const char *name)
+       }
+ 
+ #if defined(WINDOWS32)
+-    e = STAT (tem, &st);
++    e = stat_follow_links (tem, &st);
+ #else
+     e = stat (tem, &st);
+ #endif

@@ -1,0 +1,115 @@
+From 74810529b5329300692cf2c51fe4cef46a628c3b Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Thu, 1 Oct 2026 22:11:06 +0200
+Subject: [PATCH 3/5] sed: escape bracket-expression literals that are special
+ in Rust regex
+
+A bracket expression is passed to the Rust regex engine nearly verbatim,
+but some characters that are literal in a POSIX bracket expression are
+special there: '[' starts a nested class, and "&&" and "~~" are set
+operators. automake's ylwrap quotes file names with `s/[][\\.*]/\\&/g`,
+which failed with "unclosed character class". In addition, a literal '['
+consumed the next character, so `[&~[]` was reported as an unterminated
+bracket expression.
+
+Escape a literal '[', a leading ']', '&' and '~' inside bracket
+expressions, and stop consuming the character after a literal '['.
+---
+ src/sed/delimited_parser.rs | 38 +++++++++++++++++++++++++++----------
+ 1 file changed, 28 insertions(+), 10 deletions(-)
+
+diff --git a/src/sed/delimited_parser.rs b/src/sed/delimited_parser.rs
+index b6a9b2d..cd507a7 100644
+--- a/src/sed/delimited_parser.rs
++++ b/src/sed/delimited_parser.rs
+@@ -242,9 +242,11 @@ fn parse_character_class(
+         line.advance();
+     }
+ 
+-    // Optional leading ']' inside the class
++    // Optional leading ']' inside the class, which is a literal.  The result
++    // is compiled with Rust regex syntax, where characters that are literal
++    // in a POSIX bracket expression can be special, so they are escaped.
+     if !line.eol() && line.current() == ']' {
+-        result.push(b']');
++        result.extend_from_slice(b"\\]");
+         line.advance();
+     }
+ 
+@@ -304,10 +306,9 @@ fn parse_character_class(
+ 
+                 continue;
+             }
+-            // Not a POSIX construct — treat as literal
+-            result.push(b'[');
+-            result.push(line.current_byte());
+-            line.advance();
++            // Not a POSIX construct: a literal '['.  Rust would start a nested
++            // class, and the next character may be the closing ']'.
++            result.extend_from_slice(b"\\[");
+             continue;
+         }
+ 
+@@ -325,6 +326,10 @@ fn parse_character_class(
+                 line.advance();
+             }
+         } else {
++            // "&&" and "~~" are set operators in Rust classes.
++            if ch == '&' || ch == '~' {
++                result.push(b'\\');
++            }
+             result.push(line.current_byte());
+             line.advance();
+         }
+@@ -954,7 +959,7 @@ mod tests {
+         let mut line = char_provider_from("[]abc]");
+         let lines = test_lines();
+         let result = parse_character_class(&lines, &mut line, CharacterMode::Utf8).unwrap();
+-        assert_eq!(result, b"[]abc]");
++        assert_eq!(result, br"[\]abc]");
+     }
+ 
+     #[test]
+@@ -962,7 +967,7 @@ mod tests {
+         let mut line = char_provider_from("[^]abc]");
+         let lines = test_lines();
+         let result = parse_character_class(&lines, &mut line, CharacterMode::Utf8).unwrap();
+-        assert_eq!(result, b"[^]abc]");
++        assert_eq!(result, br"[^\]abc]");
+     }
+ 
+     #[test]
+@@ -1066,7 +1071,20 @@ mod tests {
+         let mut line = char_provider_from("[[x]yz]");
+         let lines = test_lines();
+         let result = parse_character_class(&lines, &mut line, CharacterMode::Utf8).unwrap();
+-        assert_eq!(result, b"[[x]");
++        assert_eq!(result, br"[\[x]");
++    }
++
++    #[test]
++    fn test_literal_open_bracket_before_closing_bracket() {
++        // automake's ylwrap quotes file names with `s/[][\\.*]/\\&/g`.
++        let mut line = char_provider_from(r"[][\\.*]");
++        let lines = test_lines();
++        let result = parse_character_class(&lines, &mut line, CharacterMode::Utf8).unwrap();
++        assert_eq!(result, br"[\]\[\\.*]");
++
++        let mut line = char_provider_from("[&~[]");
++        let result = parse_character_class(&lines, &mut line, CharacterMode::Utf8).unwrap();
++        assert_eq!(result, br"[\&\~\[]");
+     }
+ 
+     #[test]
+@@ -1074,7 +1092,7 @@ mod tests {
+         let mut line = char_provider_from("[a[b]");
+         let lines = test_lines();
+         let result = parse_character_class(&lines, &mut line, CharacterMode::Utf8).unwrap();
+-        assert_eq!(result, b"[a[b]");
++        assert_eq!(result, br"[a\[b]");
+     }
+ 
+     // parse_regex
+-- 
+2.56.0.windows.1
+

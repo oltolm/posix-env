@@ -1,0 +1,44 @@
+context:
+  version: "0.2.0"
+
+package:
+  name: uutils-grep
+  version: ${{ version }}
+
+source:
+  url: https://github.com/uutils/grep/archive/refs/tags/${{ version }}.tar.gz
+  sha256: aabb48c5f14aa46befa4b0b2848889d3ca2ff819d5855acfab590f7f47d223b9
+
+build:
+  number: 1
+  script:
+    interpreter: brush
+    content:
+      # Link the packaged oniguruma; without pkg-config finding it, onig_sys
+      # silently builds its bundled copy.
+      - export RUSTONIG_SYSTEM_LIBONIG=1 RUSTONIG_DYNAMIC_LIBONIG=1
+      - export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
+      - cargo build --release --locked --bin grep
+      - mkdir -p "$PREFIX/bin"
+      - cp target/release/grep.exe "$PREFIX/bin/"
+
+requirements:
+  build:
+    - posix-env
+    - pkgconf
+  host:
+    - oniguruma
+
+tests:
+  - script:
+      interpreter: cmd
+      content:
+        - grep --version
+        - echo abc | grep -q "^a.c" || exit /b 1
+        - echo abc | grep -qE "b+" || exit /b 1
+
+about:
+  homepage: https://github.com/uutils/grep
+  license: MIT
+  license_file: LICENSE
+  summary: Rust rewrite of GNU grep

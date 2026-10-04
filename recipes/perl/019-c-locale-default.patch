@@ -1,0 +1,28 @@
+Without LC_ALL, LC_<CATEGORY> and LANG, use the C locale, as POSIX says,
+not the Windows default locale (".ACP": decimal comma, local month
+names).  posix-env's programs all behave so.
+
+--- a/locale.c
++++ b/locale.c
+@@ -3341,18 +3341,9 @@
+                 locale_names[j] = env_lang;
+             }
+             else {
+-
+-#    ifdef WIN32
+-                /* If no LANG, use the system default on Windows. */
+-                locale_names[j] = wrap_wsetlocale(categories[i], ".ACP");
+-                if (locale_names[j]) {
+-                    SAVEFREEPV(locale_names[j]);
+-                }
+-                else
+-#    endif
+-                {   /* If nothing was found or worked, use C */
+-                    locale_names[j] = "C";
+-                }
++                /* If nothing was found, use C, as POSIX says, also on
++                 * Windows (posix-env): not the Windows default locale. */
++                locale_names[j] = "C";
+             }
+         }
+ 

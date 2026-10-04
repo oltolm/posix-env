@@ -1,0 +1,90 @@
+Build on native Windows (MinGW-w64, UCRT): no getrlimit (a fixed limit
+for the directory descriptor cache), no S_IFLNK in st_mode (any nonzero
+file type that no regular file has), no owners or groups (getegid,
+fchown are no-ops; fchmod too, as files are written through the
+descriptor and only a read-only bit exists), no SIGHUP or SIGCHLD.
+
+diff --git a/src/common.h b/src/common.h
+--- a/src/common.h
++++ b/src/common.h
+@@ -43,6 +43,20 @@
+ #include <time.h>
+ #include <unistd.h>
+ 
++#ifdef _WIN32
++/* Native Windows has no symbolic link file type in st_mode, and no
++   owners or groups to set.  patch only needs S_IFLNK to be a nonzero
++   file type that no regular file has.  */
++# ifndef S_IFLNK
++#  define S_IFLNK 0120000
++# endif
++# define getegid() ((gid_t) 0)
++# define fchown(fd, uid, gid) ((void) (fd), (void) (uid), (void) (gid), 0)
++/* Only the read-only bit exists, and the file is written through FD
++   anyway.  */
++# define fchmod(fd, mode) ((void) (fd), (void) (mode), 0)
++#endif
++
+ /* handy definitions */
+ 
+ #define strEQ(s1,s2) (!strcmp(s1, s2))
+diff --git a/src/safe.c b/src/safe.c
+--- a/src/safe.c
++++ b/src/safe.c
+@@ -21,7 +21,13 @@
+ #include <config.h>
+ #include <sys/types.h>
+ #include <sys/stat.h>
+-#include <sys/resource.h>
++#ifndef _WIN32
++# include <sys/resource.h>
++#else
++/* No getrlimit; see init_dirfd_cache.  */
++typedef unsigned long rlim_t;
++# define RLIM_INFINITY ((rlim_t) -1)
++#endif
+ #include <sys/time.h>
+ #include <fcntl.h>
+ #include <stdio.h>
+@@ -103,6 +109,10 @@
+ 
+ static void init_dirfd_cache (void)
+ {
++#ifdef _WIN32
++  /* No getrlimit; the UCRT allows 8192 descriptors.  */
++  max_cached_fds = MAX (8192 / 4, min_cached_fds);
++#else
+   struct rlimit nofile;
+ 
+   if (getrlimit (RLIMIT_NOFILE, &nofile) == 0)
+@@ -114,6 +124,7 @@
+     }
+   else
+     max_cached_fds = min_cached_fds;
++#endif
+ 
+   cached_dirfds = hash_initialize (min_cached_fds, nullptr,
+ 				   hash_cached_dirfd,
+diff --git a/src/util.c b/src/util.c
+--- a/src/util.c
++++ b/src/util.c
+@@ -1228,7 +1228,9 @@
+ {
+   static int const sigs[] =
+     {
++#ifdef SIGHUP
+       SIGHUP,
++#endif
+       SIGINT,
+ #ifdef SIGPIPE
+       SIGPIPE,
+@@ -1246,7 +1248,9 @@
+   enum { NUM_SIGS = sizeof sigs / sizeof *sigs };
+ 
+   /* System V fork+wait does not work if SIGCHLD is ignored.  */
++#ifdef SIGCHLD
+   signal (SIGCHLD, SIG_DFL);
++#endif
+ 
+ #if HAVE_SIGACTION && HAVE_SIGFILLSET
+   struct sigaction fatal_act = { .sa_handler = handle_signal };

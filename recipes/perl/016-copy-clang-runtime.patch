@@ -1,0 +1,23 @@
+From MSYS2's mingw-w64-perl (018-copy-clang-runtime.patch).
+
+diff --git a/win32/GNUmakefile b/win32/GNUmakefile
+index f7e7857..8785e4a 100644
+--- a/win32/GNUmakefile
++++ b/win32/GNUmakefile
+@@ -1834,6 +1834,7 @@ test-prep : all utils ..\pod\perltoc.pod $(TESTPREPGCC)
+ # your compiler, and upon the values of "x".
+ # libstdc++-6.dll is copied if it exists as it, too, may then be needed.
+ # Without this copying, the op/taint.t test script will fail.
++# libc++ and libunwind are actually clang, but clang is pretending to be GCC
+ 
+ ifeq ($(CCTYPE),GCC)
+ 
+@@ -1846,6 +1847,8 @@ test-prep-gcc :
+ 	if exist $(CCDLLDIR)\libquadmath-0.dll $(XCOPY) $(CCDLLDIR)\libquadmath-0.dll ..\t\$(NULL)
+ 	if exist $(CCDLLDIR)\libmcfgthread-1.dll $(XCOPY) $(CCDLLDIR)\libmcfgthread-1.dll ..\t\$(NULL)
+ 	if exist $(CCDLLDIR)\libmcfgthread-2.dll $(XCOPY) $(CCDLLDIR)\libmcfgthread-2.dll ..\t\$(NULL)
++	if exist $(CCDLLDIR)\libc++.dll $(XCOPY) $(CCDLLDIR)\libc++.dll ..\t\$(NULL)
++	if exist $(CCDLLDIR)\libunwind.dll $(XCOPY) $(CCDLLDIR)\libunwind.dll ..\t\$(NULL)
+ 
+ endif
+ 

@@ -1,0 +1,149 @@
+Upstream pull request https://github.com/Perl/perl5/pull/24453, as MSYS2 applies it.
+
+diff --git a/dist/ExtUtils-ParseXS/Changes b/dist/ExtUtils-ParseXS/Changes
+index f8df044..c141b51 100644
+--- a/dist/ExtUtils-ParseXS/Changes
++++ b/dist/ExtUtils-ParseXS/Changes
+@@ -1,5 +1,9 @@
+ Revision history for Perl extension ExtUtils::ParseXS.
+ 
++3.64
++  - PERL_UNUSED_VAR() the CV declared when an ALIAS or
++    XSINTERFACE_FUNC_SET has been seen.
++
+ 3.63 Sun Apr  5 2026
+   - allow 'length(foo)' to work with any 'foo' type that has
+         'SvPV_nolen()' or similar in its typemap, not just that it maps
+diff --git a/dist/ExtUtils-ParseXS/lib/ExtUtils/ParseXS.pm b/dist/ExtUtils-ParseXS/lib/ExtUtils/ParseXS.pm
+index b30054f..5e6e2cb 100644
+--- a/dist/ExtUtils-ParseXS/lib/ExtUtils/ParseXS.pm
++++ b/dist/ExtUtils-ParseXS/lib/ExtUtils/ParseXS.pm
+@@ -76,7 +76,7 @@ use Symbol;
+ 
+ our $VERSION;
+ BEGIN {
+-  $VERSION = '3.63';
++  $VERSION = '3.64';
+   require ExtUtils::ParseXS::Constants; ExtUtils::ParseXS::Constants->VERSION($VERSION);
+   require ExtUtils::ParseXS::CountLines; ExtUtils::ParseXS::CountLines->VERSION($VERSION);
+   require ExtUtils::ParseXS::Node; ExtUtils::ParseXS::Node->VERSION($VERSION);
+diff --git a/dist/ExtUtils-ParseXS/lib/ExtUtils/ParseXS/Constants.pm b/dist/ExtUtils-ParseXS/lib/ExtUtils/ParseXS/Constants.pm
+index 9063c7c..99294c3 100644
+--- a/dist/ExtUtils-ParseXS/lib/ExtUtils/ParseXS/Constants.pm
++++ b/dist/ExtUtils-ParseXS/lib/ExtUtils/ParseXS/Constants.pm
+@@ -3,7 +3,7 @@ use strict;
+ use warnings;
+ use Symbol;
+ 
+-our $VERSION = '3.63';
++our $VERSION = '3.64';
+ 
+ =head1 NAME
+ 
+diff --git a/dist/ExtUtils-ParseXS/lib/ExtUtils/ParseXS/CountLines.pm b/dist/ExtUtils-ParseXS/lib/ExtUtils/ParseXS/CountLines.pm
+index 53c5ab6..379697a 100644
+--- a/dist/ExtUtils-ParseXS/lib/ExtUtils/ParseXS/CountLines.pm
++++ b/dist/ExtUtils-ParseXS/lib/ExtUtils/ParseXS/CountLines.pm
+@@ -14,7 +14,7 @@ package ExtUtils::ParseXS::CountLines;
+ use strict;
+ use warnings;
+ 
+-our $VERSION = '3.63';
++our $VERSION = '3.64';
+ 
+ our $SECTION_END_MARKER;
+ 
+diff --git a/dist/ExtUtils-ParseXS/lib/ExtUtils/ParseXS/Eval.pm b/dist/ExtUtils-ParseXS/lib/ExtUtils/ParseXS/Eval.pm
+index 3f55ad0..26b1c9b 100644
+--- a/dist/ExtUtils-ParseXS/lib/ExtUtils/ParseXS/Eval.pm
++++ b/dist/ExtUtils-ParseXS/lib/ExtUtils/ParseXS/Eval.pm
+@@ -2,7 +2,7 @@ package ExtUtils::ParseXS::Eval;
+ use strict;
+ use warnings;
+ 
+-our $VERSION = '3.63';
++our $VERSION = '3.64';
+ 
+ =head1 NAME
+ 
+diff --git a/dist/ExtUtils-ParseXS/lib/ExtUtils/ParseXS/Node.pm b/dist/ExtUtils-ParseXS/lib/ExtUtils/ParseXS/Node.pm
+index 7c4edd7..a56a286 100644
+--- a/dist/ExtUtils-ParseXS/lib/ExtUtils/ParseXS/Node.pm
++++ b/dist/ExtUtils-ParseXS/lib/ExtUtils/ParseXS/Node.pm
+@@ -3,7 +3,7 @@ use strict;
+ use warnings;
+ use Symbol;
+ 
+-our $VERSION = '3.63';
++our $VERSION = '3.64';
+ 
+ =head1 NAME
+ 
+@@ -1726,11 +1726,15 @@ EOF
+     # in particular, when emitting one of:
+     #      XSANY.any_i32 = $value;
+     #      XSINTERFACE_FUNC_SET(cv, $value);
++    #
++    # It may be that all of the uses are guarded by false conditionals,
++    # so make sure we don't get an unused variable warning.
+ 
+     if ($pxs->{need_boot_cv}) {
+         print $self->Q(<<"EOF");
+             |    $open_brace
+             |        CV * cv;
++            |        PERL_UNUSED_VAR(cv);
+             |
+ EOF
+     }
+diff --git a/dist/ExtUtils-ParseXS/lib/ExtUtils/ParseXS/Utilities.pm b/dist/ExtUtils-ParseXS/lib/ExtUtils/ParseXS/Utilities.pm
+index c4ced35..be46942 100644
+--- a/dist/ExtUtils-ParseXS/lib/ExtUtils/ParseXS/Utilities.pm
++++ b/dist/ExtUtils-ParseXS/lib/ExtUtils/ParseXS/Utilities.pm
+@@ -5,7 +5,7 @@ use Exporter;
+ use File::Spec;
+ use ExtUtils::ParseXS::Constants ();
+ 
+-our $VERSION = '3.63';
++our $VERSION = '3.64';
+ 
+ our (@ISA, @EXPORT_OK);
+ @ISA = qw(Exporter);
+diff --git a/dist/ExtUtils-ParseXS/lib/ExtUtils/Typemaps.pm b/dist/ExtUtils-ParseXS/lib/ExtUtils/Typemaps.pm
+index 4ce2cd5..31fd1dd 100644
+--- a/dist/ExtUtils-ParseXS/lib/ExtUtils/Typemaps.pm
++++ b/dist/ExtUtils-ParseXS/lib/ExtUtils/Typemaps.pm
+@@ -2,7 +2,7 @@ package ExtUtils::Typemaps;
+ use 5.006001;
+ use strict;
+ use warnings;
+-our $VERSION = '3.63';
++our $VERSION = '3.64';
+ 
+ require ExtUtils::ParseXS;
+ require ExtUtils::ParseXS::Constants;
+diff --git a/dist/ExtUtils-ParseXS/lib/perlxs.pod b/dist/ExtUtils-ParseXS/lib/perlxs.pod
+index 2e68c28..642b4d5 100644
+--- a/dist/ExtUtils-ParseXS/lib/perlxs.pod
++++ b/dist/ExtUtils-ParseXS/lib/perlxs.pod
+@@ -5006,7 +5006,7 @@ this model, the less likely conflicts will occur.
+ 
+ =head1 XS VERSION
+ 
+-This document covers features supported by F<xsubpp> 3.63.
++This document covers features supported by F<xsubpp> 3.64.
+ 
+ =head1 AUTHOR DIAGNOSTICS
+ 
+diff --git a/dist/ExtUtils-ParseXS/t/008-parse-xsub-keywords.t b/dist/ExtUtils-ParseXS/t/008-parse-xsub-keywords.t
+index 47e3a38..c8d13c4 100644
+--- a/dist/ExtUtils-ParseXS/t/008-parse-xsub-keywords.t
++++ b/dist/ExtUtils-ParseXS/t/008-parse-xsub-keywords.t
+@@ -72,6 +72,8 @@ EOF
+             [  0, qr{"Foo::biz",.*\n.*= 3;},
+                    "has Foo::biz" ],
+             [  0, qr{\QCV * cv;}, "has cv declaration" ],
++            [  0, qr{\QCV * cv;\E\s*\QPERL_UNUSED_VAR(cv)},
++                   "has a PERL_UNUSED_VAR for the cv declaration" ],
+         ],
+ 
+         [

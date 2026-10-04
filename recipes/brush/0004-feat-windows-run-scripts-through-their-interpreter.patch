@@ -1,0 +1,176 @@
+From e109a87ebc2fed894d892717ffa771b1f476a761 Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Thu, 1 Oct 2026 17:00:53 +0200
+Subject: [PATCH 04/21] feat(windows): run #! scripts through their interpreter
+
+Windows cannot execute scripts itself, so running `./config.status`,
+`./libtool` or any other `#!` script failed with os error 193.
+
+Read the `#!` line and run its interpreter with the script as an
+argument. POSIX interpreter paths such as /bin/sh do not exist on
+Windows, so look the interpreter up by file name in PATH (as MSYS does
+by mapping /bin onto its own root); `#!/usr/bin/env NAME` names it in
+its argument. Such scripts also count as executable for `test -x` and
+PATH lookup.
+
+Assisted-by: Claude Code:claude-opus-5-5
+---
+ brush-core/src/commands.rs       |  22 ++++++-
+ brush-core/src/sys/windows/fs.rs | 106 ++++++++++++++++++++++++++++++-
+ 2 files changed, 126 insertions(+), 2 deletions(-)
+
+diff --git a/brush-core/src/commands.rs b/brush-core/src/commands.rs
+index 6fc537e9..c69caa15 100644
+--- a/brush-core/src/commands.rs
++++ b/brush-core/src/commands.rs
+@@ -177,7 +177,27 @@ pub fn compose_std_command<S: AsRef<OsStr>, SE: extensions::ShellExtensions>(
+     args: &[S],
+     empty_env: bool,
+ ) -> Result<std::process::Command, error::Error> {
+-    let mut cmd = std::process::Command::new(command_name);
++    #[cfg(windows)]
++    let interpreter = crate::sys::fs::script_interpreter(
++        &context.shell.absolute_path(command_name),
++    )
++    .and_then(|(name, arg)| {
++        context
++            .shell
++            .find_first_executable_in_path(&name)
++            .map(|path| (path, arg))
++    });
++    #[cfg(not(windows))]
++    let interpreter: Option<(std::path::PathBuf, Option<String>)> = None;
++
++    let mut cmd;
++    if let Some((interp_path, interp_arg)) = interpreter {
++        cmd = std::process::Command::new(interp_path);
++        cmd.args(interp_arg);
++        cmd.arg(command_name);
++    } else {
++        cmd = std::process::Command::new(command_name);
++    }
+ 
+     // Override argv[0].
+     // NOTE: Not supported on all platforms.
+diff --git a/brush-core/src/sys/windows/fs.rs b/brush-core/src/sys/windows/fs.rs
+index 78650089..5000c069 100644
+--- a/brush-core/src/sys/windows/fs.rs
++++ b/brush-core/src/sys/windows/fs.rs
+@@ -50,7 +50,60 @@ fn has_executable_extension(path: &Path) -> bool {
+ /// Used both for the initial check in [`resolve_executable`] and for
+ /// [`PathExt::executable`].
+ fn is_executable_file(path: &Path) -> bool {
+-    has_executable_extension(path) && path.is_file()
++    if has_executable_extension(path) {
++        path.is_file()
++    } else {
++        read_shebang(path).is_some()
++    }
++}
++
++/// Returns the `#!` line of `path` without the `#!`, if it has one.
++///
++/// Windows cannot run such scripts itself, but build systems written for
++/// POSIX run them directly (`./config.status`, `./libtool`), so the shell
++/// treats them as executables and runs their interpreter.
++fn read_shebang(path: &Path) -> Option<String> {
++    use std::io::Read;
++
++    if !path.is_file() {
++        return None;
++    }
++    let mut buf = [0u8; 256];
++    let n = std::fs::File::open(path).ok()?.read(&mut buf).ok()?;
++    let line = buf[..n].strip_prefix(b"#!")?;
++    let end = line
++        .iter()
++        .position(|&b| b == b'\n' || b == b'\r')
++        .unwrap_or(line.len());
++    Some(String::from_utf8_lossy(&line[..end]).trim().to_string())
++}
++
++/// Returns the interpreter and its optional argument for a `#!` script.
++///
++/// POSIX interpreter paths such as `/bin/sh` do not exist on Windows, so only
++/// the file name is kept and the caller looks it up in `PATH`, as MSYS does by
++/// mapping `/bin` and `/usr/bin` onto its own root. `/usr/bin/env NAME` names
++/// the interpreter in its argument.
++pub fn script_interpreter(path: &Path) -> Option<(String, Option<String>)> {
++    if has_executable_extension(path) {
++        return None;
++    }
++    let line = read_shebang(path)?;
++    let (interp, arg) = match line.split_once([' ', '\t']) {
++        Some((interp, arg)) => (interp, Some(arg.trim().to_string())),
++        None => (line.as_str(), None),
++    };
++    let name = interp.rsplit(['/', '\\']).next().unwrap_or(interp);
++    if name == "env"
++        && let Some(arg) = arg
++    {
++        let (name, rest) = match arg.split_once([' ', '\t']) {
++            Some((name, rest)) => (name.to_string(), Some(rest.trim().to_string())),
++            None => (arg, None),
++        };
++        return Some((name, rest));
++    }
++    Some((name.to_string(), arg))
+ }
+ 
+ /// Resolves an owned path to the actual on-disk executable file, if any.
+@@ -452,4 +505,55 @@ mod tests {
+         let path = PathBuf::from(r"C:\__brush_test_definitely_missing__");
+         assert!(resolve_executable(path).is_none());
+     }
++
++    fn write_file(dir: &Path, name: &str, contents: &str) -> PathBuf {
++        let path = dir.join(name);
++        std::fs::write(&path, contents).unwrap();
++        path
++    }
++
++    /// POSIX interpreter paths such as /bin/sh do not exist on Windows, so only
++    /// the interpreter's file name is kept, to be looked up in PATH.
++    #[test]
++    fn script_interpreter_keeps_file_name_and_argument() {
++        let dir = tempfile::tempdir().unwrap();
++
++        let plain = write_file(dir.path(), "configure", "#!/bin/sh\necho hi\n");
++        assert_eq!(script_interpreter(&plain), Some(("sh".into(), None)));
++
++        let with_arg = write_file(dir.path(), "script", "#! /bin/bash -e\r\n");
++        assert_eq!(
++            script_interpreter(&with_arg),
++            Some(("bash".into(), Some("-e".into())))
++        );
++
++        let env = write_file(dir.path(), "tool", "#!/usr/bin/env perl -w\n");
++        assert_eq!(
++            script_interpreter(&env),
++            Some(("perl".into(), Some("-w".into())))
++        );
++    }
++
++    #[test]
++    fn script_interpreter_ignores_other_files() {
++        let dir = tempfile::tempdir().unwrap();
++
++        let text = write_file(dir.path(), "notes", "plain text\n");
++        assert_eq!(script_interpreter(&text), None);
++
++        // Files with a PATHEXT extension are run by Windows itself.
++        let batch = write_file(dir.path(), "run.bat", "#!/bin/sh\n");
++        assert_eq!(script_interpreter(&batch), None);
++    }
++
++    #[test]
++    fn shebang_scripts_are_executable() {
++        use crate::sys::fs::PathExt as _;
++
++        let dir = tempfile::tempdir().unwrap();
++        let script = write_file(dir.path(), "libtool", "#!/bin/sh\n");
++        let text = write_file(dir.path(), "notes", "plain text\n");
++        assert!(script.as_path().executable());
++        assert!(!text.as_path().executable());
++    }
+ }

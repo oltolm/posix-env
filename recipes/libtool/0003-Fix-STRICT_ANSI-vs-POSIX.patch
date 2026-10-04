@@ -1,0 +1,16 @@
+0003-Fix-STRICT_ANSI-vs-POSIX.patch
+From MSYS2's mingw-w64-libtool.
+
+diff --git a/build-aux/ltmain.in b/build-aux/ltmain.in
+index ff7659a..f605454 100644
+--- a/build-aux/ltmain.in
++++ b/build-aux/ltmain.in
+@@ -3882,7 +3882,7 @@ EOF
+ 
+ /* declarations of non-ANSI functions */
+ #if defined __MINGW32__
+-# ifdef __STRICT_ANSI__
++# if defined(__STRICT_ANSI__) && !defined(__MINGW64_VERSION_MAJOR) || defined(_POSIX_)
+ _CRTIMP int __cdecl _putenv (const char *);
+ # endif
+ #elif defined __CYGWIN__

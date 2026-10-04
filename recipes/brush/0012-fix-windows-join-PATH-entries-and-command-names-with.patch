@@ -1,0 +1,95 @@
+From c439188ff6eded2f42ea5a25592c4a3477eae9dc Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Thu, 1 Oct 2026 19:25:36 +0200
+Subject: [PATCH 12/21] fix(windows): join PATH entries and command names with
+ `/`
+
+`PathBuf::join` inserts `\` on Windows, so with PATH spelled using `/`,
+`command -v`, `type`, `hash` and `$_` reported paths such as
+`C:/msys64/ucrt64/bin\gcc.exe`. Scripts paste these into sed and eval,
+where `\` is an escape character.
+
+Join the two with `/` on Windows, as is already done for PWD.
+
+Assisted-by: Claude Code:claude-opus-5-5
+---
+ brush-core/src/pathsearch.rs |  4 ++--
+ brush-core/src/sys/fs.rs     | 38 ++++++++++++++++++++++++++++++++++++
+ 2 files changed, 40 insertions(+), 2 deletions(-)
+
+diff --git a/brush-core/src/pathsearch.rs b/brush-core/src/pathsearch.rs
+index 0cf959c4..96ac189c 100644
+--- a/brush-core/src/pathsearch.rs
++++ b/brush-core/src/pathsearch.rs
+@@ -23,7 +23,7 @@ where
+ 
+     fn next(&mut self) -> Option<Self::Item> {
+         while let Some(path) = self.paths.pop_front() {
+-            let path = PathBuf::from(path.as_ref()).join(self.filename.as_ref());
++            let path = sys::fs::join_command_path(path.as_ref(), self.filename.as_ref());
+ 
+             // Ask the platform to resolve the path to an actual executable file, which on
+             // Windows may involve appending a PATHEXT extension. The helper takes ownership
+@@ -137,7 +137,7 @@ where
+     let mut first_non_executable = None;
+ 
+     for dir in paths {
+-        let path = dir.as_ref().join(filename.as_ref());
++        let path = sys::fs::join_command_path(dir.as_ref(), filename.as_ref());
+ 
+         // Remember the first non-directory entry seen, in case no executable turns up.
+         if first_non_executable.is_none() && path.metadata().is_ok_and(|m| !m.is_dir()) {
+diff --git a/brush-core/src/sys/fs.rs b/brush-core/src/sys/fs.rs
+index ee72445b..ded10b07 100644
+--- a/brush-core/src/sys/fs.rs
++++ b/brush-core/src/sys/fs.rs
+@@ -24,6 +24,31 @@ pub fn path_to_shell_string(path: &std::path::Path) -> String {
+     }
+ }
+ 
++/// Joins a PATH entry and a command name into the path the shell reports for it.
++///
++/// On Windows, `PathBuf::join` inserts `\`, so a PATH spelled with `/` produced mixed
++/// separators in `command -v`, `type` and `$_`; scripts paste those into `sed` and
++/// `eval`, where `\` is an escape character. Join with `/` instead.
++pub fn join_command_path(dir: &std::path::Path, name: &std::path::Path) -> std::path::PathBuf {
++    #[cfg(windows)]
++    {
++        let dir_str = dir.as_os_str();
++        if dir_str.is_empty() || name.is_absolute() {
++            return dir.join(name);
++        }
++        let mut joined = dir_str.to_os_string();
++        if !dir_str.to_string_lossy().ends_with(['/', '\\']) {
++            joined.push("/");
++        }
++        joined.push(name.as_os_str());
++        std::path::PathBuf::from(joined)
++    }
++    #[cfg(not(windows))]
++    {
++        dir.join(name)
++    }
++}
++
+ /// Extension trait for path-related filesystem operations.
+ pub trait PathExt {
+     /// Returns true if the path exists and is readable by the current user.
+@@ -82,4 +107,17 @@ mod tests {
+             "//server/share/dir"
+         );
+     }
++
++    /// `command -v` must not report `C:/msys64/ucrt64/bin\gcc.exe`.
++    #[test]
++    fn command_paths_join_with_forward_slash() {
++        let join = |dir: &str, name: &str| join_command_path(Path::new(dir), Path::new(name));
++        assert_eq!(
++            join("C:/msys64/ucrt64/bin", "gcc.exe").as_os_str(),
++            "C:/msys64/ucrt64/bin/gcc.exe"
++        );
++        assert_eq!(join("C:/bin/", "gcc.exe").as_os_str(), "C:/bin/gcc.exe");
++        // An existing trailing separator is kept as written.
++        assert_eq!(join(r"C:\bin\", "gcc.exe").as_os_str(), r"C:\bin\gcc.exe");
++    }
+ }

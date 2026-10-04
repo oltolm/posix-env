@@ -1,0 +1,117 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Tobias Stoeckmann <tobias@stoeckmann.org>
+Date: Sun, 4 Oct 2026 17:15:47 +0200
+Subject: [PATCH 3/6] unzip: Look up alternative filenames as well (ddf8247)
+
+---
+ unzip/bsdunzip.c          | 38 ++++++++++++++++++++++++++++++--------
+ unzip/bsdunzip_platform.h |  7 +++++++
+ unzip/test/test_Z1.c      |  2 +-
+ 3 files changed, 38 insertions(+), 9 deletions(-)
+
+diff --git a/unzip/bsdunzip.c b/unzip/bsdunzip.c
+index b7cf7cb..9981cbf 100644
+--- a/unzip/bsdunzip.c
++++ b/unzip/bsdunzip.c
+@@ -633,7 +633,7 @@ extract2fd(struct archive *a, char *pathname, int fd)
+ static void
+ extract_file(struct archive *a, struct archive_entry *e, char **path)
+ {
+-	int flags, mode;
++	int mode;
+ 	struct timespec mtime;
+ 	struct stat sb;
+ 	int fd, check, text;
+@@ -733,11 +733,7 @@ recheck:
+ 		return;
+ 	}
+ 
+-	flags = O_RDWR|O_CREAT|O_TRUNC;
+-#if defined(_WIN32) && !defined(__CYGWIN__)
+-	flags |= O_BINARY;
+-#endif
+-	if ((fd = open(*path, flags, mode)) < 0)
++	if ((fd = open(*path, O_RDWR|O_CREAT|O_TRUNC|O_BINARY, mode)) < 0)
+ 		error("open('%s')", *path);
+ 
+ 	info(" extracting: %s", *path);
+@@ -1017,7 +1013,8 @@ unzip(const char *fn)
+ {
+ 	struct archive *a;
+ 	struct archive_entry *e;
+-	int ret;
++	char *buf;
++	int fd, ret;
+ 	uintmax_t total_size, file_count, error_count;
+ 
+ 	if ((a = archive_read_new()) == NULL)
+@@ -1034,7 +1031,29 @@ unzip(const char *fn)
+ 		archive_read_set_passphrase_callback(a, NULL,
+ 			&passphrase_callback);
+ 
+-	ac(archive_read_open_filename(a, fn, 8192));
++	buf = NULL;
++	fd = open(fn, O_RDONLY | O_BINARY | O_CLOEXEC);
++	if (fd == -1) {
++		size_t s;
++
++		s = strlen(fn) + 5;
++		buf = malloc(s);
++		if (buf == NULL)
++			error("Failed to construct filename");
++		if (snprintf(buf, s, "%s.zip", fn) < 0)
++			errorx("Failed to construct filename");
++		fd = open(buf, O_RDONLY | O_BINARY | O_CLOEXEC);
++		if (fd == -1) {
++			if (snprintf(buf, s, "%s.ZIP", fn) < 0)
++				errorx("Failed to construct filename");
++			fd = open(buf, O_RDONLY | O_BINARY | O_CLOEXEC);
++		}
++		if (fd != -1)
++			fn = buf;
++	}
++	if (fd == -1)
++		errorx("Failed to open '%s'", fn);
++	ac(archive_read_open_fd(a, fd, 64 * 1024));
+ 
+ 	if (!zipinfo_mode) {
+ 		if (!p_opt && !q_opt)
+@@ -1103,6 +1122,9 @@ unzip(const char *fn)
+ 			       fn);
+ 		}
+ 	}
++
++	close(fd);
++	free(buf);
+ }
+ 
+ static void
+diff --git a/unzip/bsdunzip_platform.h b/unzip/bsdunzip_platform.h
+index f8753d2..f209cf3 100644
+--- a/unzip/bsdunzip_platform.h
++++ b/unzip/bsdunzip_platform.h
+@@ -48,4 +48,11 @@
+ #define __LA_NORETURN
+ #endif
+ 
++#ifndef O_BINARY
++#define O_BINARY	0
++#endif
++#ifndef O_CLOEXEC
++#define O_CLOEXEC	0
++#endif
++
+ #endif /* !BSDUNZIP_PLATFORM_H_INCLUDED */
+diff --git a/unzip/test/test_Z1.c b/unzip/test/test_Z1.c
+index ca70805..6ae5fec 100644
+--- a/unzip/test/test_Z1.c
++++ b/unzip/test/test_Z1.c
+@@ -27,7 +27,7 @@ DEFINE_TEST(test_Z_1)
+ 	int r;
+ 
+ 	extract_reference_file(reffile);
+-	r = systemf("%s -Z -1 %s >test.out 2>test.err", testprog, reffile);
++	r = systemf("%s -Z -1 test_basic >test.out 2>test.err", testprog);
+ 	assertEqualInt(0, r);
+ 	assertNonEmptyFile("test.out");
+ 	assertTextFileContents("test_basic/\ntest_basic/a\ntest_basic/b\ntest_basic/c\ntest_basic/CAPS\n", "test.out");

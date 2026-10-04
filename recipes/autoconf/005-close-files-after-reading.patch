@@ -1,0 +1,42 @@
+Close files after reading from them.  Perl keeps a lexical handle open
+as its last-read one after it goes out of scope, and Win32 cannot rename
+or replace an open file: autoheader, also run by autoreconf, failed with
+"cannot backup config.h.in: Permission denied".
+
+diff --git a/bin/autoheader.in b/bin/autoheader.in
+--- a/bin/autoheader.in
++++ b/bin/autoheader.in
+@@ -231,6 +231,8 @@
+ if (open (my $fh, "<", $config_h_in))
+   {
+     my $firstline = readline($fh);
++    # Win32 cannot rename the file below while it is open.
++    close ($fh);
+     # If the file is empty, $firstline will be undef.  We _do_ want to
+     # go ahead and update it in that case.
+     if (defined $firstline
+diff --git a/bin/autoreconf.in b/bin/autoreconf.in
+--- a/bin/autoreconf.in
++++ b/bin/autoreconf.in
+@@ -395,9 +395,12 @@
+     {
+       if ($l =~ /^(?:scriptversion|timestamp)='?(\d\d\d\d-\d\d-\d\d(?:\.\d\d)?)/)
+         {
++          # Win32 cannot replace the file (--force) while it is open.
++          close ($fh);
+           return $1;
+         }
+     }
++  close ($fh);
+   # Old versions of install-sh did not have a timestamp line.
+   return '1970-01-01';
+ }
+@@ -1038,6 +1041,8 @@
+       if (open (my $fh, "<", $tmpl1))
+         {
+           my $line = readline($fh);
++          # Win32 cannot replace the file (autoheader) while it is open.
++          close ($fh);
+           if (defined $line
+               && $line !~ /^\/\* .*\.  Generated from .* by autoheader\.  \*\//)
+             {

@@ -1,0 +1,44 @@
+diff --git a/common/CMakeLists.txt b/common/CMakeLists.txt
+index 92535dc..1dbca07 100644
+--- a/common/CMakeLists.txt
++++ b/common/CMakeLists.txt
+@@ -30,7 +30,7 @@ add_library(${PROJECT_NAME} STATIC
+    ${SOURCE_FILES}
+ )
+ 
+-set_property(TARGET ${PROJECT_NAME} PROPERTY C_STANDARD 90)
++set_property(TARGET ${PROJECT_NAME} PROPERTY C_STANDARD 11)
+ 
+ target_include_directories(${PROJECT_NAME} PUBLIC "misc")
+ target_include_directories(${PROJECT_NAME} PUBLIC "m4")
+diff --git a/common/m4/lib/canonicalize.c b/common/m4/lib/canonicalize.c
+index 1cbda23..0fe3355 100644
+--- a/common/m4/lib/canonicalize.c
++++ b/common/m4/lib/canonicalize.c
+@@ -54,10 +54,12 @@
+ #endif
+ 
+ #ifdef _WIN32
++#ifndef __MINGW32__
+ static __inline void* mempcpy(void* dst, const void* src, size_t len)
+ {
+    return (char*)memcpy(dst, src, len) + len;
+ }
++#endif
+ #define rawmemchr(p, c) memchr(p, c, (size_t)-1)
+ #define readlink(r, b, s) -1 // TODO
+ #endif
+diff --git a/common/m4/lib/malloc/scratch_buffer.h b/common/m4/lib/malloc/scratch_buffer.h
+index 4c07d5b..5313e20 100644
+--- a/common/m4/lib/malloc/scratch_buffer.h
++++ b/common/m4/lib/malloc/scratch_buffer.h
+@@ -20,7 +20,9 @@
+ #define _SCRATCH_BUFFER_H
+ 
+ #ifdef _WIN32
++#ifdef _MSC_VER
+ typedef double max_align_t;
++#endif
+ #include <libc-config.h>
+ #endif
+ 

@@ -1,0 +1,49 @@
+Official readline 8.3 patch 001, from https://ftpmirror.gnu.org/gnu/readline/readline-8.3-patches/readline83-001
+Bug-Description:
+
+If an application uses readline's event hook, it is called while waiting for
+input. There is a bug in the function that waits for available input that
+causes it not to read that input under certain circumstances, resulting in
+a loop where the event hook continues to be called, but there is no input
+to stop it.
+
+
+diff --git a/input.c b/input.c
+index e6a39e2..3383edb 100644
+--- a/input.c
++++ b/input.c
+@@ -261,13 +261,16 @@ rl_gather_tyi (void)
+   input = 0;
+   tty = fileno (rl_instream);
+ 
+-  /* Move this up here to give it first shot, but it can't set chars_avail */
++  /* Move this up here to give it first shot, but it can't set chars_avail,
++     so we assume a single character is available. */
+   /* XXX - need rl_chars_available_hook? */
+   if (rl_input_available_hook)
+     {
+       result = (*rl_input_available_hook) ();
+       if (result == 0)
+         result = -1;
++      else
++        chars_avail = 1;
+     }
+ 
+ #if defined (HAVE_PSELECT) || defined (HAVE_SELECT)
+@@ -285,6 +288,7 @@ rl_gather_tyi (void)
+ #endif
+       if (result <= 0)
+ 	return 0;	/* Nothing to read. */
++      result = -1;	/* there is something, so check how many chars below */
+     }
+ #endif
+ 
+diff --git a/patchlevel b/patchlevel
+index d8c9df7..fdf4740 100644
+--- a/patchlevel
++++ b/patchlevel
+@@ -1,3 +1,3 @@
+ # Do not edit -- exists only for use by patch
+ 
+-0
++1

@@ -1,0 +1,56 @@
+context:
+  version: "5.4.1"
+
+package:
+  name: gawk
+  version: ${{ version }}
+
+source:
+  url: https://ftpmirror.gnu.org/gnu/gawk/gawk-${{ version }}.tar.gz
+  sha256: 8b3b0ea83930311a3f30905d3ce898d32c6103c2fe20d6a90b40341171b174de
+  patches:
+    # The pc/ port predates current mingw-w64 UCRT headers.
+    - 001-mingw-w64-ucrt.patch
+    # The default AWKPATH and AWKLIBPATH follow the installation.
+    - 002-relocate-default-paths.patch
+    # UTF-8 locales named "...UTF-8"; a crash on non-UTF-8 multibyte paths.
+    - 003-utf8-codeset-names.patch
+
+build:
+  number: 10
+  script:
+    interpreter: brush
+    file: build.sh
+
+requirements:
+  build:
+    - posix-env
+  host:
+    - gmp
+    - mpfr
+    - readline
+
+tests:
+  - script:
+      interpreter: cmd
+      content:
+        - gawk --version
+        - echo BEGIN { }> t.awk
+        - echo quit | gawk -D -f t.awk || exit /b 1
+        - awk "BEGIN { exit !(2 ^ 100 == 1267650600228229401496703205376) }" || exit /b 1
+        - gawk -i join "BEGIN { exit 0 }" || exit /b 1
+        - gawk -M "BEGIN { exit !(2 ^ 100 == 1267650600228229401496703205376) }" || exit /b 1
+        - echo a b c | gawk "{ print $2 }" | findstr /b b || exit /b 1
+        # Whatever LANG names, gawk runs (patch 003: it crashed on UTF-8
+        # locales named "...UTF-8").
+        - set LC_ALL=
+        - set LANG=de_DE.UTF-8
+        - gawk "BEGIN { exit length(sprintf(\"%%c\", 228)) != 1 }" || exit /b 1
+        - set LANG=C.UTF-8
+        - gawk "BEGIN { exit length(sprintf(\"%%c\", 228)) != 1 }" || exit /b 1
+
+about:
+  homepage: https://www.gnu.org/software/gawk/
+  license: GPL-3.0-or-later
+  license_file: COPYING
+  summary: GNU version of awk

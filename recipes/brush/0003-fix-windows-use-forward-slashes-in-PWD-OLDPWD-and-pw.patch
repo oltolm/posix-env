@@ -1,0 +1,136 @@
+From 4d5d4259b34fad0710e87c54e014d3b2b2f308f8 Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Thu, 1 Oct 2026 17:00:53 +0200
+Subject: [PATCH 03/21] fix(windows): use forward slashes in PWD, OLDPWD and
+ pwd
+
+Scripts splice these values into sed replacements, eval and case
+patterns, where `\` is an escape character; configure's $ac_pwd and
+$srcdir came out mangled.
+
+Render them with `/` separators (as `cygpath -m` does) and drop the
+`\\?\` prefix that canonicalization adds for `pwd -P`.
+
+Assisted-by: Claude Code:claude-opus-5-5
+---
+ brush-builtins/src/pwd.rs       |  6 ++++-
+ brush-core/src/shell/fs.rs      |  4 +--
+ brush-core/src/sys/fs.rs        | 48 +++++++++++++++++++++++++++++++++
+ brush-core/src/wellknownvars.rs |  2 +-
+ 4 files changed, 56 insertions(+), 4 deletions(-)
+
+diff --git a/brush-builtins/src/pwd.rs b/brush-builtins/src/pwd.rs
+index 09f9cadc..cbff6fba 100644
+--- a/brush-builtins/src/pwd.rs
++++ b/brush-builtins/src/pwd.rs
+@@ -33,7 +33,11 @@ impl builtins::Command for PwdCommand {
+             cwd = cwd.canonicalize()?.into();
+         }
+ 
+-        writeln!(context.stdout(), "{}", cwd.to_string_lossy())?;
++        writeln!(
++            context.stdout(),
++            "{}",
++            brush_core::sys::fs::path_to_shell_string(&cwd)
++        )?;
+ 
+         Ok(ExecutionResult::success())
+     }
+diff --git a/brush-core/src/shell/fs.rs b/brush-core/src/shell/fs.rs
+index 33ffe30d..0228314b 100644
+--- a/brush-core/src/shell/fs.rs
++++ b/brush-core/src/shell/fs.rs
+@@ -35,7 +35,7 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
+         // Normalize the path (but don't canonicalize it).
+         let cleaned_path = abs_path.normalize();
+ 
+-        let pwd = cleaned_path.to_string_lossy().to_string();
++        let pwd = crate::sys::fs::path_to_shell_string(&cleaned_path);
+ 
+         self.env.update_or_add(
+             "PWD",
+@@ -48,7 +48,7 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
+ 
+         self.env.update_or_add(
+             "OLDPWD",
+-            variables::ShellValueLiteral::Scalar(oldpwd.to_string_lossy().to_string()),
++            variables::ShellValueLiteral::Scalar(crate::sys::fs::path_to_shell_string(&oldpwd)),
+             |_| Ok(()),
+             EnvironmentLookup::Anywhere,
+             EnvironmentScope::Global,
+diff --git a/brush-core/src/sys/fs.rs b/brush-core/src/sys/fs.rs
+index a5dabfa2..ee72445b 100644
+--- a/brush-core/src/sys/fs.rs
++++ b/brush-core/src/sys/fs.rs
+@@ -2,6 +2,28 @@
+ 
+ pub use super::platform::fs::*;
+ 
++/// Renders a path the way the shell exposes it in `PWD`, `OLDPWD` and `pwd`.
++///
++/// On Windows, scripts splice these values into `sed` replacements, `case`
++/// patterns and other strings where `\` is an escape character, so separators
++/// are rendered as `/` (as with `cygpath -m`); the `\\?\` verbatim prefix that
++/// canonicalization adds is dropped for the same reason.
++pub fn path_to_shell_string(path: &std::path::Path) -> String {
++    let s = path.to_string_lossy();
++    #[cfg(windows)]
++    {
++        let s = s.strip_prefix(r"\\?\UNC\").map_or_else(
++            || s.strip_prefix(r"\\?\").unwrap_or(&s).to_string(),
++            |unc| format!(r"\\{unc}"),
++        );
++        s.replace('\\', "/")
++    }
++    #[cfg(not(windows))]
++    {
++        s.into_owned()
++    }
++}
++
+ /// Extension trait for path-related filesystem operations.
+ pub trait PathExt {
+     /// Returns true if the path exists and is readable by the current user.
+@@ -35,3 +57,29 @@ pub trait PathExt {
+     /// Returns the device ID and inode number for the path.
+     fn get_device_and_inode(&self) -> Result<(u64, u64), crate::error::Error>;
+ }
++
++#[cfg(test)]
++#[cfg(windows)]
++mod tests {
++    use std::path::Path;
++
++    use super::*;
++
++    #[test]
++    fn shell_paths_use_forward_slashes() {
++        assert_eq!(
++            path_to_shell_string(Path::new(r"C:\msys64\ucrt64")),
++            "C:/msys64/ucrt64"
++        );
++    }
++
++    /// `pwd -P` canonicalizes, which adds the `\\?\` verbatim prefix.
++    #[test]
++    fn shell_paths_drop_the_verbatim_prefix() {
++        assert_eq!(path_to_shell_string(Path::new(r"\\?\C:\src")), "C:/src");
++        assert_eq!(
++            path_to_shell_string(Path::new(r"\\?\UNC\server\share\dir")),
++            "//server/share/dir"
++        );
++    }
++}
+diff --git a/brush-core/src/wellknownvars.rs b/brush-core/src/wellknownvars.rs
+index cb347ba9..a576a9cd 100644
+--- a/brush-core/src/wellknownvars.rs
++++ b/brush-core/src/wellknownvars.rs
+@@ -524,7 +524,7 @@ pub(crate) fn init_well_known_vars(
+     // we inherited an out-of-sync version of the variable. Future updates
+     // will be handled by set_working_dir().
+     //
+-    let pwd = shell.working_dir().to_string_lossy().to_string();
++    let pwd = sys::fs::path_to_shell_string(shell.working_dir());
+     let mut pwd_var = ShellVariable::new(pwd);
+     pwd_var.export();
+     shell.env_mut().set_global("PWD", pwd_var)?;

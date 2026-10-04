@@ -1,0 +1,74 @@
+From 1d634920e7a48acaaa8823f0568ecaee7997a1a3 Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Thu, 1 Oct 2026 17:00:54 +0200
+Subject: [PATCH 11/21] fix(parser): remove backslashes inside backquotes as
+ POSIX requires
+
+Inside backquotes, a backslash before `$`, `` ` `` or `\` is removed
+before the command is parsed, and bash also removes it before `"` when
+the substitution is itself in double quotes. `\\` was kept as `\\` and
+`\$` and `\"` were kept verbatim, so libtool's config.status line
+case `eval \\$ECHO \\""\\$$var"\\"` in
+failed to parse and every variable in the generated libtool script was
+lost.
+
+Assisted-by: Claude Code:claude-opus-5-5
+---
+ brush-parser/src/word.rs                             | 11 ++++++++++-
+ .../compat/word_expansion/command_substitution.yaml  | 12 ++++++++++++
+ 2 files changed, 22 insertions(+), 1 deletion(-)
+
+diff --git a/brush-parser/src/word.rs b/brush-parser/src/word.rs
+index 8ec2d84d..6f0ab5ad 100644
+--- a/brush-parser/src/word.rs
++++ b/brush-parser/src/word.rs
+@@ -884,6 +884,7 @@ peg::parser! {
+         rule double_quoted_word_piece() -> WordPiece =
+             arithmetic_expansion() /
+             legacy_arithmetic_expansion() /
++            "`" c:double_quoted_backquoted_command() "`" { WordPiece::BackquotedCommandSubstitution(c) } /
+             command_substitution() /
+             parameter_expansion() /
+             double_quoted_escape_sequence() /
+@@ -1185,9 +1186,17 @@ peg::parser! {
+         rule backquoted_command() -> String =
+             chars:(backquoted_char()*) { chars.into_iter().collect() }
+ 
++        // POSIX: inside backquotes, a backslash keeps its literal meaning except
++        // before `$`, `` ` ``, or `\`, where it is removed before the command is parsed.
++        // Within double quotes, `\"` in a backquoted command also loses its backslash
++        // (as in bash), so "`echo \"a b\"`" runs `echo "a b"`.
++        rule double_quoted_backquoted_command() -> String =
++            chars:(("\\\"" { "\"" }) / backquoted_char())* { chars.into_iter().collect() }
++
+         rule backquoted_char() -> &'input str =
+             "\\`" { "`" } /
+-            "\\\\" { "\\\\" } /
++            "\\\\" { "\\" } /
++            "\\$" { "$" } /
+             s:$([^'`']) { s }
+ 
+         rule arithmetic_expansion() -> WordPiece =
+diff --git a/brush-shell/tests/cases/compat/word_expansion/command_substitution.yaml b/brush-shell/tests/cases/compat/word_expansion/command_substitution.yaml
+index f19cf724..ac2c40b8 100644
+--- a/brush-shell/tests/cases/compat/word_expansion/command_substitution.yaml
++++ b/brush-shell/tests/cases/compat/word_expansion/command_substitution.yaml
+@@ -52,6 +52,18 @@ cases:
+       echo " `echo Second line` "
+       echo "Third`echo line`here"
+ 
++  # POSIX: inside backquotes, a backslash before $, a backquote or another
++  # backslash is removed before the command is parsed; bash also removes it
++  # before " when the substitution is inside double quotes. libtool's
++  # config.status relies on this (case 4 is its quoting line).
++  - name: "Backtick command substitution removes escaping backslashes"
++    stdin: |
++      x=`echo \\"`; echo "1: $x"
++      v=value; x=`echo \$v`; echo "2: $x"
++      x="`echo \"a b\"`"; echo "3: $x"
++      ECHO=echo; var=v
++      x=`eval \\$ECHO \\""\\$$var"\\"`; echo "4: $x"
++
+   - name: "Ignore single quote in comment in command substitution"
+     stdin: |
+       var=$(

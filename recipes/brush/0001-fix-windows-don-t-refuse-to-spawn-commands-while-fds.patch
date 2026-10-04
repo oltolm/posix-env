@@ -1,0 +1,57 @@
+From 094784c0936933bb6b17a457703a2db9c72f2f01 Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Thu, 1 Oct 2026 17:00:52 +0200
+Subject: [PATCH 01/21] fix(windows): don't refuse to spawn commands while fds
+ above 2 are open
+
+inject_fds failed with "operation not supported" whenever the shell held
+an fd other than 0-2, so every external command failed while one was
+open. Configure scripts keep `exec 5>>config.log` open for their whole
+run.
+
+Win32 processes inherit only the standard handles, so there is no way
+to pass such fds on; ignore them on Windows instead of failing.
+
+Assisted-by: Claude Code:claude-opus-5-5
+---
+ brush-core/src/sys/stubs/commands.rs | 23 +++++++++++++++++++++++
+ 1 file changed, 23 insertions(+)
+
+diff --git a/brush-core/src/sys/stubs/commands.rs b/brush-core/src/sys/stubs/commands.rs
+index 03e9a3a7..d5454b5d 100644
+--- a/brush-core/src/sys/stubs/commands.rs
++++ b/brush-core/src/sys/stubs/commands.rs
+@@ -68,6 +68,14 @@ impl CommandFdInjectionExt for std::process::Command {
+         &mut self,
+         mut open_files: impl Iterator<Item = (ShellFd, openfiles::OpenFile)>,
+     ) -> Result<(), error::Error> {
++        // Win32 processes inherit only the three standard handles, so there is
++        // no way to pass these on. Refusing would make every command fail while
++        // the shell holds such an fd open, as configure scripts do for their
++        // whole run with `exec 5>>config.log`.
++        if cfg!(windows) {
++            return Ok(());
++        }
++
+         if open_files.next().is_some() {
+             return Err(error::ErrorKind::NotSupportedOnThisPlatform("fd redirections").into());
+         }
+@@ -93,3 +101,18 @@ impl CommandFgControlExt for std::process::Command {
+         // NOTE: This is a no-op.
+     }
+ }
++
++#[cfg(test)]
++#[cfg(windows)]
++mod tests {
++    use super::*;
++
++    /// configure keeps `exec 5>>config.log` open while it runs every other command.
++    #[test]
++    fn fds_above_two_do_not_prevent_spawning() {
++        let file = tempfile::tempfile().unwrap();
++        let open_files = [(5, openfiles::OpenFile::from(file))];
++        let mut cmd = std::process::Command::new("cmd.exe");
++        assert!(cmd.inject_fds(open_files.into_iter()).is_ok());
++    }
++}

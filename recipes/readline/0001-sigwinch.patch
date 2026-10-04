@@ -1,0 +1,88 @@
+From MSYS2's mingw-w64-readline.
+
+diff --git a/readline.c b/readline.c
+index 33b6c13..ece5026 100644
+--- a/readline.c
++++ b/readline.c
+@@ -1215,7 +1215,12 @@ rl_initialize (void)
+       RL_SETSTATE(RL_STATE_INITIALIZED);
+     }
+   else
+-    _rl_reset_locale ();	/* check current locale and set locale variables */
++    {
++      _rl_reset_locale ();	/* check current locale and set locale variables */
++#if defined (__MINGW32__)
++      rl_reset_screen_size ();
++#endif      
++    }
+ 
+   /* Initialize the current line information. */
+   _rl_init_line_state ();
+diff --git a/signals.c b/signals.c
+index 5a070d7..6e9b4fa 100644
+--- a/signals.c
++++ b/signals.c
+@@ -46,6 +46,11 @@
+ 
+ #include "rlprivate.h"
+ 
++#if defined (__MINGW32__)
++#  define WIN32_LEAN_AND_MEAN
++#  include <windows.h>
++#endif
++
+ #if defined (HANDLE_SIGNALS)
+ 
+ #define SIGHANDLER_RETURN return
+@@ -80,7 +85,7 @@ static void _rl_handle_signal (int);
+ int rl_catch_signals = 1;
+ 
+ /* If non-zero, readline will install a signal handler for SIGWINCH. */
+-#ifdef SIGWINCH
++#if defined (SIGWINCH) || defined(__MINGW32__)
+ int rl_catch_sigwinch = 1;
+ #else
+ int rl_catch_sigwinch = 0;	/* for the readline state struct in readline.c */
+@@ -515,6 +520,21 @@ rl_set_signals (void)
+     }
+ #endif /* SIGWINCH */
+ 
++#if defined (__MINGW32__)
++  if (rl_catch_sigwinch && sigwinch_set_flag == 0)
++    {
++      DWORD mode;
++      HANDLE hStdIn = GetStdHandle (STD_INPUT_HANDLE);
++
++      if (GetConsoleMode (hStdIn, &mode))
++        {
++          mode |= ENABLE_WINDOW_INPUT;
++          if (SetConsoleMode (hStdIn, mode))
++            sigwinch_set_flag = 1;
++        }
++    }
++#endif
++
+   return 0;
+ }
+ 
+@@ -565,6 +585,20 @@ rl_clear_signals (void)
+       sigwinch_set_flag = 0;
+     }
+ #endif
++#if defined (__MINGW32__)
++  if (rl_catch_sigwinch && sigwinch_set_flag == 1)
++    {
++      DWORD mode;
++      HANDLE hStdIn = GetStdHandle (STD_INPUT_HANDLE);
++
++      if (GetConsoleMode (hStdIn, &mode))
++        {
++          mode &= ~ENABLE_WINDOW_INPUT;
++          if (SetConsoleMode (hStdIn, mode))
++            sigwinch_set_flag = 0;
++        }
++    }
++#endif
+ 
+   return 0;
+ }

@@ -1,0 +1,61 @@
+context:
+  version: "1.4.21"
+
+package:
+  name: m4
+  version: ${{ version }}
+
+source:
+  url: https://ftpmirror.gnu.org/gnu/m4/m4-${{ version }}.tar.xz
+  sha256: f25c6ab51548a73a75558742fb031e0625d6485fe5f9155949d6486a2408ab66
+  patches:
+    # Message catalogs follow the installation.
+    - 0001-relocate-localedir.patch
+    # LF line ends in output and traces.
+    - 0002-binary-output.patch
+
+build:
+  number: 9
+  script:
+    interpreter: brush
+    content:
+      # The patches change src/m4.c, which makes the shipped man page look
+      # out of date; regenerating it needs help2man.  The help text is
+      # unchanged.
+      - touch doc/m4.1
+      # syscmd runs the sh found in PATH (brush); configure's own search
+      # finds none, as it does not try sh.exe.
+      - >-
+        ./configure --prefix="$PREFIX" --disable-rpath --with-syscmd-shell=sh
+        --with-libintl-prefix="$PREFIX" --with-libiconv-prefix="$PREFIX"
+      - make -j"$(nproc)"
+      - make install
+      - rm -f "$PREFIX/share/info/dir"
+
+requirements:
+  build:
+    - posix-env
+  host:
+    - gettext-runtime
+    - libiconv
+
+tests:
+  - script:
+      interpreter: cmd
+      content:
+        - m4 --version
+        - echo define(`x', `42')x | m4 | findstr /b 42 || exit /b 1
+        # Bytes in, bytes out: the CR of cmd's echo passes through, and no
+        # CR is added ("42\r\n", 4 bytes; the trace "m4trace: -1- x\n", 15).
+        - echo define(`x', `42')x| m4 -t x > o.txt 2> e.txt
+        - for %%f in (o.txt) do if not %%~zf==4 exit /b 1
+        - for %%f in (e.txt) do if not %%~zf==15 exit /b 1
+        # Translations are found: German messages.
+        - set LC_ALL=de_DE
+        - m4 nosuchfile 2>&1 | findstr /c:"Fehler beim" || exit /b 1
+
+about:
+  homepage: https://www.gnu.org/software/m4/
+  license: GPL-3.0-or-later
+  license_file: COPYING
+  summary: GNU m4 macro processor

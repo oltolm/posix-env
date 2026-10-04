@@ -1,0 +1,69 @@
+From fb385321fa134e652299d97e5d275177e8b4ee20 Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Thu, 1 Oct 2026 17:00:53 +0200
+Subject: [PATCH 08/21] fix: don't deadlock on here-docs larger than the pipe
+ buffer
+
+A here-doc is written into a pipe before the command that reads it
+starts. Linux grows the pipe to fit; elsewhere a here-doc larger than
+the buffer blocked forever, e.g. on Windows (4 KiB buffer) when
+configure embeds a 45 KB lex.yy.c in one.
+
+Write the contents from a separate thread on those platforms; wasm has
+no threads and keeps the synchronous write.
+
+Assisted-by: Claude Code:claude-opus-5-5
+---
+ brush-core/src/interp.rs                 | 18 ++++++++++++++++--
+ brush-shell/tests/cases/compat/here.yaml | 12 ++++++++++++
+ 2 files changed, 28 insertions(+), 2 deletions(-)
+
+diff --git a/brush-core/src/interp.rs b/brush-core/src/interp.rs
+index f991e45d..6875a0ad 100644
+--- a/brush-core/src/interp.rs
++++ b/brush-core/src/interp.rs
+@@ -2039,8 +2039,22 @@ fn setup_open_file_with_contents(contents: &str) -> Result<OpenFile, error::Erro
+         nix::fcntl::fcntl(reader.as_fd(), nix::fcntl::FcntlArg::F_SETPIPE_SZ(len))?;
+     }
+ 
+-    writer.write_all(bytes)?;
+-    drop(writer);
++    #[cfg(any(target_os = "linux", target_os = "android", target_family = "wasm"))]
++    {
++        writer.write_all(bytes)?;
++        drop(writer);
++    }
++
++    // Elsewhere the pipe buffer cannot be grown to fit (it is 4 KiB on Windows) and
++    // nothing reads the pipe until the command starts, so write from another thread.
++    #[cfg(not(any(target_os = "linux", target_os = "android", target_family = "wasm")))]
++    {
++        let bytes = bytes.to_vec();
++        std::thread::spawn(move || {
++            // The reader may exit without consuming everything; that is not an error.
++            let _ = writer.write_all(&bytes);
++        });
++    }
+ 
+     Ok(reader.into())
+ }
+diff --git a/brush-shell/tests/cases/compat/here.yaml b/brush-shell/tests/cases/compat/here.yaml
+index 627211bc..3f663231 100644
+--- a/brush-shell/tests/cases/compat/here.yaml
++++ b/brush-shell/tests/cases/compat/here.yaml
+@@ -654,3 +654,15 @@ cases:
+       body
+       EOF)
+       echo "[$x]"
++
++  # The body is written into a pipe before its reader starts; it must not block
++  # once it exceeds the pipe buffer.
++  - name: "Here doc larger than a pipe buffer"
++    timeout_in_seconds: 60
++    stdin: |
++      big=$(i=0; while [ $i -lt 20000 ]; do echo "line $i"; i=$((i + 1)); done)
++      n=0
++      while read -r l; do n=$((n + 1)); done <<END-MARKER
++      $big
++      END-MARKER
++      echo "$n"

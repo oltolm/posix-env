@@ -1,0 +1,26 @@
+From MSYS2's mingw-w64-perl (017-arm64.patch).
+
+diff --git a/win32/GNUmakefile b/win32/GNUmakefile
+index 27cad95..f7e7857 100644
+--- a/win32/GNUmakefile
++++ b/win32/GNUmakefile
+@@ -397,7 +397,7 @@ endif
+ # Check processor architecture from target triplet
+ # possible values:
+ # gcc: i686-w64-mingw32, x86_64-w64-mingw32
+-# clang: i686-w64-windows-gnu, x86_64-w64-windows-gnu
++# clang: i686-w64-windows-gnu, x86_64-w64-windows-gnu, aarch64-w64-windows-gnu
+ ifeq ($(CCTYPE),GCC)
+ ifeq (x86_64, $(findstring x86_64, $(GCCTARGET)))
+ WIN64 := define
+@@ -407,6 +407,10 @@ ifeq (i686, $(findstring i686, $(GCCTARGET)))
+ WIN64 := undef
+ PROCESSOR_ARCHITECTURE := x86
+ endif
++ifeq (aarch64, $(findstring aarch64, $(GCCTARGET)))
++WIN64 := define
++PROCESSOR_ARCHITECTURE := arm64
++endif
+ endif
+ 
+ PROCESSOR_ARCHITECTURE  ?= x86

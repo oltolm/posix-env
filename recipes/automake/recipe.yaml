@@ -1,0 +1,65 @@
+context:
+  version: "1.18.1"
+
+package:
+  name: automake
+  version: ${{ version }}
+
+source:
+  url: https://ftpmirror.gnu.org/gnu/automake/automake-${{ version }}.tar.xz
+  sha256: 168aa363278351b89af56684448f525a5bce5079d0b6842bd910fdd3f1646887
+  patches:
+    - 0001-unix-paths-in-makefiles.patch
+
+build:
+  number: 4
+  script:
+    interpreter: brush
+    file: build.sh
+
+requirements:
+  build:
+    - posix-env
+    - perl
+    - autoconf
+  host:
+    - scriptexe
+  run:
+    - perl
+    - autoconf
+
+tests:
+  - requirements:
+      run:
+        - posix-env
+    script:
+      interpreter: cmd
+      content:
+        - automake --version
+        - aclocal --version
+        - echo AC_INIT([t],[1])> configure.ac
+        - echo AC_CONFIG_MACRO_DIR([m4])>> configure.ac
+        - echo AM_INIT_AUTOMAKE([foreign subdir-objects])>> configure.ac
+        - echo AC_PROG_CC>> configure.ac
+        - echo T_X>> configure.ac
+        - echo AC_CONFIG_FILES([Makefile])>> configure.ac
+        - echo AC_OUTPUT>> configure.ac
+        - echo ACLOCAL_AMFLAGS = -I m4> Makefile.am
+        - echo bin_PROGRAMS = t>> Makefile.am
+        - echo t_SOURCES = sub/t.c>> Makefile.am
+        - mkdir m4 sub
+        - echo AC_DEFUN([T_X], [:])> m4\x.m4
+        - echo int main (void) { return 0; }> sub\t.c
+        - autoreconf -i || exit /b 1
+        # Paths in Makefile.in keep forward slashes.
+        - findstr /c:"m4/x.m4" Makefile.in || exit /b 1
+        - findstr /c:"sub/$(DEPDIR)/$(am__dirstamp):" Makefile.in || exit /b 1
+        - sh ./configure || exit /b 1
+        - make || exit /b 1
+        - if not exist t.exe exit /b 1
+
+about:
+  homepage: https://www.gnu.org/software/automake/
+  license: GPL-2.0-or-later
+  license_file: COPYING
+  summary: GNU Automake, for native Win32 perl

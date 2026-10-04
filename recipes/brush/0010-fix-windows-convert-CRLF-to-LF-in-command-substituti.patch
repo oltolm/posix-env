@@ -1,0 +1,68 @@
+From 56312fa07898acc7c26477c1e79f1ab9e664f9a9 Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Thu, 1 Oct 2026 17:00:54 +0200
+Subject: [PATCH 10/21] fix(windows): convert CRLF to LF in command
+ substitution output
+
+Native Windows programs write CRLF to text-mode stdout, so every value
+captured with $(...) kept a trailing CR. GCC's configure, for example,
+compares $(gcc --print-prog-name=...) with a plain file name and
+misdetected an LTO plugin.
+
+Convert CRLF to LF in the captured output, as MSYS2's bash does.
+
+Assisted-by: Claude Code:claude-opus-5-5
+---
+ brush-core/src/commands.rs | 35 +++++++++++++++++++++++++++++++++++
+ 1 file changed, 35 insertions(+)
+
+diff --git a/brush-core/src/commands.rs b/brush-core/src/commands.rs
+index c69caa15..6533d2b7 100644
+--- a/brush-core/src/commands.rs
++++ b/brush-core/src/commands.rs
+@@ -797,6 +797,9 @@ pub(crate) async fn invoke_command_in_subshell_and_get_output(
+ 
+     let output_str = async_reader.read_to_string().await?;
+ 
++    #[cfg(windows)]
++    let output_str = crlf_to_lf(output_str);
++
+     // Now observe the command's completion.
+     let run_result = cmd_join_handle.await?;
+     let cmd_result = run_result?;
+@@ -890,3 +893,35 @@ fn try_unwrap_bare_input_redir_program(program: &ast::Program) -> Option<&ast::I
+         _ => None,
+     }
+ }
++
++/// Native Windows programs write CRLF to text-mode stdout; without this, every
++/// captured line keeps a trailing CR (MSYS2's bash makes the same conversion).
++#[cfg(windows)]
++fn crlf_to_lf(output: String) -> String {
++    if output.contains("\r\n") {
++        output.replace("\r\n", "\n")
++    } else {
++        output
++    }
++}
++
++#[cfg(test)]
++#[cfg(windows)]
++mod tests {
++    use super::crlf_to_lf;
++
++    #[test]
++    fn command_substitution_drops_cr_before_lf() {
++        assert_eq!(
++            crlf_to_lf("liblto_plugin.so\r\n".into()),
++            "liblto_plugin.so\n"
++        );
++        assert_eq!(crlf_to_lf("a\r\nb\r\n".into()), "a\nb\n");
++    }
++
++    /// A lone CR is data, as in libtool's CR-aware `nm` patterns.
++    #[test]
++    fn command_substitution_keeps_other_cr() {
++        assert_eq!(crlf_to_lf("a\rb\n".into()), "a\rb\n");
++    }
++}

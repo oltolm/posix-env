@@ -1,0 +1,49 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Tobias Stoeckmann <tobias@stoeckmann.org>
+Date: Sun, 4 Oct 2026 17:15:46 +0200
+Subject: [PATCH 1/6] unzip: Set O_BINARY on Windows systems (9aa710d)
+
+---
+ unzip/bsdunzip.c | 15 +++++++++++++--
+ 1 file changed, 13 insertions(+), 2 deletions(-)
+
+diff --git a/unzip/bsdunzip.c b/unzip/bsdunzip.c
+index ba63e41..ccca15e 100644
+--- a/unzip/bsdunzip.c
++++ b/unzip/bsdunzip.c
+@@ -633,7 +633,7 @@ extract2fd(struct archive *a, char *pathname, int fd)
+ static void
+ extract_file(struct archive *a, struct archive_entry *e, char **path)
+ {
+-	int mode;
++	int flags, mode;
+ 	struct timespec mtime;
+ 	struct stat sb;
+ 	int fd, check, text;
+@@ -733,7 +733,11 @@ recheck:
+ 		return;
+ 	}
+ 
+-	if ((fd = open(*path, O_RDWR|O_CREAT|O_TRUNC, mode)) < 0)
++	flags = O_RDWR|O_CREAT|O_TRUNC;
++#if defined(_WIN32) && !defined(__CYGWIN__)
++	flags |= O_BINARY;
++#endif
++	if ((fd = open(*path, flags, mode)) < 0)
+ 		error("open('%s')", *path);
+ 
+ 	info(" extracting: %s", *path);
+@@ -1307,6 +1311,13 @@ main(int argc, char *argv[])
+ 	if (n_opt + o_opt + u_opt > 1)
+ 		errorx("-n, -o and -u are contradictory");
+ 
++#if defined(_WIN32) && !defined(__CYGWIN__)
++	if (c_opt || p_opt) {
++		if (_setmode(STDOUT_FILENO, _O_BINARY) == -1)
++			errorx("unable to set binary output mode");
++	}
++#endif
++
+ 	unzip(zipfile);
+ 
+ 	exit(EXIT_SUCCESS);

@@ -1,0 +1,38 @@
+Report a failed command's exit status on Win32 perl, whose POSIX module
+has no WIFEXITED and the like ("POSIX::WIFEXITED not implemented on this
+architecture"); its $? is the exit code shifted left by 8.
+
+diff --git a/lib/Autom4te/FileUtils.pm b/lib/Autom4te/FileUtils.pm
+--- a/lib/Autom4te/FileUtils.pm
++++ b/lib/Autom4te/FileUtils.pm
+@@ -236,9 +236,11 @@
+     {
+       use POSIX qw (WIFEXITED WEXITSTATUS WIFSIGNALED WTERMSIG);
+ 
+-      if (WIFEXITED ($?))
++      # Win32 perl's POSIX has no wait status macros; its $? is the
++      # exit code shifted left by 8.
++      if ($^O eq 'MSWin32' || WIFEXITED ($?))
+ 	{
+-	  my $status = WEXITSTATUS ($?);
++	  my $status = $^O eq 'MSWin32' ? $? >> 8 : WEXITSTATUS ($?);
+ 	  # Propagate exit codes.
+ 	  fatal ('',
+ 		 "$command failed with exit status: $status",
+diff --git a/lib/Autom4te/General.pm b/lib/Autom4te/General.pm
+--- a/lib/Autom4te/General.pm
++++ b/lib/Autom4te/General.pm
+@@ -363,9 +363,11 @@
+     {
+       use POSIX qw (WIFEXITED WEXITSTATUS WIFSIGNALED WTERMSIG);
+ 
+-      if (WIFEXITED ($?))
++      # Win32 perl's POSIX has no wait status macros; its $? is the
++      # exit code shifted left by 8.
++      if ($^O eq 'MSWin32' || WIFEXITED ($?))
+ 	{
+-	  my $status = WEXITSTATUS ($?);
++	  my $status = $^O eq 'MSWin32' ? $? >> 8 : WEXITSTATUS ($?);
+ 	  # WIFEXITED and WEXITSTATUS can alter $!, reset it so that
+ 	  # error() actually propagates the command's exit status, not $!.
+ 	  $! = 0;

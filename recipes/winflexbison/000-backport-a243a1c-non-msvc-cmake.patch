@@ -1,0 +1,460 @@
+Backport of upstream commit a243a1c, source and CMake files only:
+CMake: Migrate VS-only and deprecated CMakeSettings to CMakePresets (#107).
+Without it, 2.5.25 builds only with MSVC.
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index cf657a6..92e5563 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1,9 +1,14 @@
+-cmake_minimum_required(VERSION 3.0.0 FATAL_ERROR)
++cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
+ 
+-project (winflexbison)
++project(winflexbison VERSION 2.5.25 LANGUAGES C)
++
++# cmake 3.31+ - enable `install` destination paths normalization.
++if(POLICY CMP0177)
++  cmake_policy(SET CMP0177 OLD)
++endif()
+ 
+ if(NOT MSVC)
+-   message( FATAL_ERROR "Visual Studio Build supported only" )
++   message(WARNING "Only Visual Studio Build is officially supported right now")
+ endif()
+ 
+ add_definitions(-D_CRT_SECURE_NO_WARNINGS)
+@@ -20,10 +25,13 @@ add_definitions(-Drestrict=__restrict)
+ set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /W3 /MD /Od /Zi /EHsc")
+ set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /W3 /GL /Od /Oi /Gy /Zi /EHsc")
+ 
+-# Define Release by default.
+-if(NOT CMAKE_BUILD_TYPE)
+-  set(CMAKE_BUILD_TYPE "Release")
+-  message(STATUS "Build type not specified: Use Release by default.")
++# Define Release by default
++set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Build type")
++
++# Only apply to MSVC frontend (not clang frontends)
++if (MSVC AND NOT CMAKE_C_COMPILER_ID STREQUAL "Clang")
++    # Make __extension__ expand to nothing on MSVC (so GCC/Clang keep the keyword)
++    add_compile_definitions("__extension__=")
+ endif()
+ 
+ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+@@ -37,7 +45,6 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+     #   applies to WIN32/MSVC.
+     #------------------------------------------------------------------------
+     if (MSVC)
+-        add_compile_definitions("__extension__")
+         add_compile_options("/source-charset:utf-8")
+         option( USE_STATIC_RUNTIME "Set ON to change /MD(DLL) to /MT(static)" OFF )
+         if (USE_STATIC_RUNTIME)
+@@ -73,7 +80,11 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+ 
+     install(DIRECTORY "custom_build_rules/" DESTINATION "./custom_build_rules/")
+     install(DIRECTORY "bison/data/" DESTINATION "./data/")
++    install(FILES "bison/src/COPYING" DESTINATION "./" RENAME "COPYING.bison")
+     install(FILES "flex/src/FlexLexer.h" DESTINATION "./")
++    install(FILES "flex/src/COPYING" DESTINATION "./" RENAME "COPYING.flex")
++    install(FILES "COPYING" DESTINATION "./")
++    install(FILES "COPYING.DOC" DESTINATION "./")
+     install(FILES "changelog.md" DESTINATION "./")
+     install(FILES "README.md" DESTINATION "./")
+ 
+@@ -84,9 +95,9 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+ 
+     set(ENV_VERSION "$ENV{WINFLEXBISON_VERSION}")
+     if(NOT ENV_VERSION)
+-      set(CPACK_PACKAGE_VERSION "master" CACHE STRING "Complete version of the created package.")
++      set(CPACK_PACKAGE_VERSION "dev-${PROJECT_VERSION}" CACHE STRING "Complete version string of the created package.")
+     else()
+-      set(CPACK_PACKAGE_VERSION "${ENV_VERSION}" CACHE STRING "Complete version of the created package.")
++      set(CPACK_PACKAGE_VERSION "${ENV_VERSION}" CACHE STRING "Complete version string of the created package.")
+     endif()
+ 
+     set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY OFF)
+@@ -96,4 +107,4 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+     set(CPACK_PACKAGE_FILE_NAME "win_flex_bison-${CPACK_PACKAGE_VERSION}")
+ 
+     include(CPack)
+-endif()
+\ No newline at end of file
++endif()
+diff --git a/bison/CMakeLists.txt b/bison/CMakeLists.txt
+index 55de8a1..8e341ff 100644
+--- a/bison/CMakeLists.txt
++++ b/bison/CMakeLists.txt
+@@ -1,8 +1,6 @@
+-cmake_minimum_required(VERSION 3.0.0 FATAL_ERROR)
++cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
+ 
+-set(PROJECT_NAME win_bison)
+-
+-project(${PROJECT_NAME} C)
++project(win_bison LANGUAGES C)
+ 
+ file(GLOB SOURCE_FILES
+     "src/*.c"
+@@ -40,4 +38,4 @@ file(GLOB liby_src
+ add_library(y STATIC ${liby_src})
+ 
+ target_include_directories(y
+-    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/")
+\ No newline at end of file
++    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/")
+diff --git a/bison/src/config.h b/bison/src/config.h
+index 184c57b..0f25766 100644
+--- a/bison/src/config.h
++++ b/bison/src/config.h
+@@ -1,3 +1,5 @@
++#pragma once
++
+ #define PACKAGE_BUGREPORT "https://github.com/lexxmark/winflexbison/issues"
+ #define VERSION "3.8.2"
+ #define PACKAGE_COPYRIGHT_YEAR 2020
+@@ -19,4 +21,5 @@ extern char* _stpcpy(char *yydest, const char *yysrc);
+ 
+ extern int strverscmp(const char* s1, const char* s2);
+ 
+-extern int obstack_printf(struct obstack* obs, const char* format, ...);
+\ No newline at end of file
++struct obstack;
++extern int obstack_printf(struct obstack* obs, const char* format, ...);
+diff --git a/bison/src/output.c b/bison/src/output.c
+index e2b2ac7..b5038ed 100644
+--- a/bison/src/output.c
++++ b/bison/src/output.c
+@@ -44,6 +44,7 @@
+ #include "scan-skel.h"
+ #include "symtab.h"
+ #include "tables.h"
++#include "pid_tempname.h"
+ #include "strversion.h"
+ 
+ static struct obstack format_obstack;
+@@ -727,7 +728,7 @@ output_skeleton (void)
+ {
+   FILE *m4_in = NULL;
+   FILE *m4_out = NULL;
+-  char m4_in_file_name[/*MAX_PATH*/260]; 
++  char m4_in_file_name[/*MAX_PATH*/260];
+   char m4_out_file_name[/*MAX_PATH*/260];
+   char const *argv[11];
+ 
+@@ -813,10 +814,7 @@ output_skeleton (void)
+   if (trace_flag & trace_muscles)
+     muscles_output (stderr);
+   {
+-    char* p = _tempnam(NULL, "~m4_in_");    
+-    if (!p)
+-      error (EXIT_FAILURE, get_errno (),
+-             "_tempnam");
++    char* p = pid_tempname("~m4_in_");
+     m4_in = fopen(strcpy(m4_in_file_name, p), "wb+");
+     if (!m4_in)
+       error (EXIT_FAILURE, get_errno (),
+@@ -832,10 +830,7 @@ output_skeleton (void)
+   /* Read and process m4's output.  */
+   timevar_push (tv_m4);
+   {
+-    char *p = _tempnam(NULL, "~m4_out_");    
+-    if (!m4_out_file_name)
+-      error (EXIT_FAILURE, get_errno (),
+-             "_tempnam");
++    char *p = pid_tempname("~m4_out_");
+     m4_out = fopen(strcpy(m4_out_file_name, p), "wb+");
+     if (!m4_out)
+       error (EXIT_FAILURE, get_errno (),
+diff --git a/common/CMakeLists.txt b/common/CMakeLists.txt
+index 4b57c62..92535dc 100644
+--- a/common/CMakeLists.txt
++++ b/common/CMakeLists.txt
+@@ -1,8 +1,6 @@
+-cmake_minimum_required(VERSION 3.0.0 FATAL_ERROR)
++cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
+ 
+-set(PROJECT_NAME winflexbison_common)
+-
+-project(${PROJECT_NAME} C)
++project(winflexbison_common LANGUAGES C)
+ 
+ # Definition of Macros
+ add_definitions(-D_LIB)
+@@ -37,4 +35,3 @@ set_property(TARGET ${PROJECT_NAME} PROPERTY C_STANDARD 90)
+ target_include_directories(${PROJECT_NAME} PUBLIC "misc")
+ target_include_directories(${PROJECT_NAME} PUBLIC "m4")
+ target_include_directories(${PROJECT_NAME} PUBLIC "m4/lib")
+-
+diff --git a/common/m4/lib/clean-temp.h b/common/m4/lib/clean-temp.h
+index 8411b23..b493b39 100644
+--- a/common/m4/lib/clean-temp.h
++++ b/common/m4/lib/clean-temp.h
+@@ -1,10 +1,10 @@
+ /* Temporary directories and temporary files with automatic cleanup.
+-   Copyright (C) 2006, 2011-2021 Free Software Foundation, Inc.
++   Copyright (C) 2006, 2011-2022 Free Software Foundation, Inc.
+    Written by Bruno Haible <bruno@clisp.org>, 2006.
+ 
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+-   the Free Software Foundation; either version 3 of the License, or
++   the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+ 
+    This program is distributed in the hope that it will be useful,
+@@ -78,6 +78,11 @@ struct temp_dir
+   /* More fields are present here, but not public.  */
+ };
+ 
++/* Remove all registered files and subdirectories inside DIR and DIR itself.
++   DIR cannot be used any more after this call.
++   Return 0 upon success, or -1 if there was some problem.  */
++extern int cleanup_temp_dir (struct temp_dir *dir);
++
+ /* Create a temporary directory.
+    PREFIX is used as a prefix for the name of the temporary directory. It
+    should be short and still give an indication about the program.
+@@ -89,7 +94,8 @@ struct temp_dir
+    is shown and NULL is returned.  */
+ extern struct temp_dir * create_temp_dir (const char *prefix,
+                                           const char *parentdir,
+-                                          bool cleanup_verbose);
++                                          bool cleanup_verbose)
++  _GL_ATTRIBUTE_DEALLOC (cleanup_temp_dir, 1);
+ 
+ /* Register the given ABSOLUTE_FILE_NAME as being a file inside DIR, that
+    needs to be removed before DIR can be removed.
+@@ -130,12 +136,13 @@ extern int cleanup_temp_subdir (struct temp_dir *dir,
+    Return 0 upon success, or -1 if there was some problem.  */
+ extern int cleanup_temp_dir_contents (struct temp_dir *dir);
+ 
+-/* Remove all registered files and subdirectories inside DIR and DIR itself.
+-   DIR cannot be used any more after this call.
+-   Return 0 upon success, or -1 if there was some problem.  */
+-extern int cleanup_temp_dir (struct temp_dir *dir);
+-
++// _MODE_T_ is defined by msys2 env.'s
++// __mode_t_defined is defined by linux systems
++// We use the MSYS2 definition of mode_t in that case. 
++#if !defined(_MODE_T_) && !defined(__mode_t_defined)
++#define	_MODE_T_
+ typedef int mode_t;
++#endif /* _MODE_T_ */
+ 
+ /* ================== Opening and closing temporary files ================== */
+ 
+diff --git a/common/misc/config.h b/common/misc/config.h
+index 8d9ab89..5bc5023 100644
+--- a/common/misc/config.h
++++ b/common/misc/config.h
+@@ -31,7 +31,7 @@
+ #define _GL_ATTRIBUTE_COLD
+ #define _GL_ASYNC_SAFE
+ #define GNULIB_XALLOC_DIE 1
+-#define _GL_HAVE__STATIC_ASSERT
++#define _GL_HAVE__STATIC_ASSERT 1
+ #define _Static_assert(a, b)
+ #define __PGI
+ 
+@@ -39,16 +39,21 @@
+ #define _GL_CMP(a, b) (a) == (b)
+ 
+ #define __getopt_argv_const
++#if !defined (__MSYS__) && !defined (__MINGW32__) /* defined in sys/cdefs.h */
+ #define _Noreturn
++#endif
+ 
+ #ifndef _GL_INLINE
+ #define _GL_INLINE inline
+ #endif
+ 
++/* should be set by including "filename.h"
+ #ifndef FILE_SYSTEM_DRIVE_PREFIX_CAN_BE_RELATIVE
+ #define FILE_SYSTEM_DRIVE_PREFIX_CAN_BE_RELATIVE 1
+-#endif
++#endif */
+ 
++#if !defined (__MSYS__) && !defined (__MINGW32__) /* defined in sys/stat.h */
+ #define S_ISDIR(mode) (mode & _S_IFDIR)
++#endif
+ 
+-extern char* _stpcpy(char *yydest, const char *yysrc);
++extern char* _stpcpy(char *yydest, const char *yysrc);
+\ No newline at end of file
+diff --git a/common/misc/pid_tempname.c b/common/misc/pid_tempname.c
+new file mode 100644
+index 0000000..9f87982
+--- /dev/null
++++ b/common/misc/pid_tempname.c
+@@ -0,0 +1,39 @@
++#include "pid_tempname.h"
++#include <stdio.h>
++#include <process.h>
++
++char temp_prefix[40];
++
++// This adds the unique process id to the built in _tempnam to prevent race condition
++// This race condition is more prevalent in Ninja as it parallelizes build and instantiates multiple win_flex/win_bison
++// flex_temp_out_main fails frequently as its used for a longer time (compared to temp_file_names),
++// hence more possibility to overlap
++const char *pid_tempname (const char *prefix)
++{
++    // Here is the race condition:
++    //
++    //           flex A
++    //              |                                flex B
++    //              ↓                                   |
++    //   _tempnam returns ~file_X                       ↓
++    //              |                        _tempnam returns ~file_X
++    //              ↓                                   |
++    //      freopen ~file_X w+                          ↓
++    //              |                           freopen ~file_X w+
++    //              ↓                                   |
++    //             ...                                  ↓
++    //              |                                  ...
++    //              ↓                                   |
++    //       _unlink ~file_X                           ...       <- Fails to print
++    //                                                  ↓
++    //                                           _unlink ~file_X <- Fails to delete
++    //
++    // It is also possible that ~file_X was deleted before the lagging win_flex is done, which can cause other errors,
++    // hence changing to non-fatal error upon missing ~file_X on _unlink will not work all the time
++    // This problem can be prevented with an even more unique temporary file name by adding the current process ID
++    // Synchronization is not necessary either as there is no reason for the independent processes to wait...
++    // The reason why this is an issue is because Windows filesystem is reflected immediately,
++    // unlike inode in Linux that only properly deletes files when their link count is down to zero
++    sprintf(temp_prefix, "%s%d_", prefix, _getpid());
++    return _tempnam(NULL, temp_prefix);
++}
+\ No newline at end of file
+diff --git a/common/misc/pid_tempname.h b/common/misc/pid_tempname.h
+new file mode 100644
+index 0000000..6113fab
+--- /dev/null
++++ b/common/misc/pid_tempname.h
+@@ -0,0 +1,4 @@
++// The longer pid_tempname was used to distinguish from GNU's tempname header
++
++///@brief Generates a unique pid temporary file
++const char *pid_tempname (const char *prefix);
+\ No newline at end of file
+diff --git a/flex/CMakeLists.txt b/flex/CMakeLists.txt
+index f634f81..a51eb18 100644
+--- a/flex/CMakeLists.txt
++++ b/flex/CMakeLists.txt
+@@ -1,8 +1,6 @@
+-cmake_minimum_required(VERSION 3.0.0 FATAL_ERROR)
++cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
+ 
+-set(PROJECT_NAME win_flex)
+-
+-project(${PROJECT_NAME} C)
++project(win_flex LANGUAGES C)
+ 
+ file(GLOB SOURCE_FILES
+     "src/*.c"
+@@ -30,4 +28,4 @@ add_library(fl STATIC
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/libyywrap.c")
+ 
+ target_include_directories(fl
+-    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/")
+\ No newline at end of file
++    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/")
+diff --git a/flex/src/filter.c b/flex/src/filter.c
+index 62703a6..adb73af 100644
+--- a/flex/src/filter.c
++++ b/flex/src/filter.c
+@@ -22,6 +22,7 @@
+ /*  PURPOSE. */
+ 
+ #include "flexdef.h"
++#include "pid_tempname.h"
+ static const char * check_4_gnu_m4 =
+     "m4_dnl ifdef(`__gnu__', ,"
+     "`errprint(Flex requires GNU M4. Set the PATH or set the M4 environment variable to its path name.)"
+@@ -75,9 +76,7 @@ FILE* mkstempFILE (char *pref, const char *mode)
+ 	if (!pref || !*pref)
+ 		return NULL;
+ 
+-	name = _tempnam(flex_tmp_dir, pref);
+-	if (!name)
+-		return NULL;
++	name = pid_tempname(pref);
+ 
+ 	fd = fopen(name, mode);
+ 	if (fd)
+@@ -255,7 +254,7 @@ bool filter_apply_chain (struct filter * chain, FILE* in_file, FILE* out_file)
+ 	}
+ 
+ 	return result;
+-#if 0		
++#if 0
+ 	int     pid, pipes[2];
+ 
+ 
+diff --git a/flex/src/flexdef.h b/flex/src/flexdef.h
+index 8b18711..bdcb986 100644
+--- a/flex/src/flexdef.h
++++ b/flex/src/flexdef.h
+@@ -1136,7 +1136,6 @@ extern int filter_tee_header(struct filter *chain);
+ extern int filter_fix_linedirs(struct filter *chain);
+ extern int filter_m4_p(struct filter *chain);
+ 
+-extern const char* flex_tmp_dir;
+ extern FILE* mkstempFILE(char *pref, const char *mode);
+ extern void unlinktemp();
+ 
+diff --git a/flex/src/main.c b/flex/src/main.c
+index 720b776..05a8c7e 100644
+--- a/flex/src/main.c
++++ b/flex/src/main.c
+@@ -36,6 +36,7 @@
+ //#include "version.h"
+ #include "options.h"
+ #include "tables.h"
++#include "pid_tempname.h"
+ #include "parse.h"
+ #include <io.h>
+ #include <fcntl.h>
+@@ -411,12 +412,14 @@ void check_options (void)
+ 	*/
+ 
+ 	/* collect all output to temp file to use it as input for filter chain */
+-	prev_stdout = _dup(1);   // prev_stdout now refers to "stdout" 
++	prev_stdout = _dup(1);   // prev_stdout now refers to "stdout"
++
++	flex_temp_out_main = _strdup(pid_tempname("~flex_out_main_"));
+ 	freopen(flex_temp_out_main, "w+", stdout);
+ 
+ 	if (stdout == NULL)
+ 		lerr(_("could not create %s"), flex_temp_out_main);
+-	
++
+ 	yyout = stdout;
+ 
+ 
+@@ -1039,8 +1042,6 @@ void flexend (int exit_status)
+ 
+ 
+ /* flexinit - initialize flex */
+-const char* flex_tmp_dir;
+-
+ void flexinit (int argc, char **argv)
+ {
+ 	int     i, sawcmpflag, rv, optind;
+@@ -1048,14 +1049,6 @@ void flexinit (int argc, char **argv)
+ 	scanopt_t sopt;
+ 	char *ext_path = 0;
+ 
+-	flex_tmp_dir = getenv ("FLEX_TMP_DIR");
+-	{
+-	  char *p = _tempnam(flex_tmp_dir, "~flex_out_main_");
+-	  if (!p)
+-  		flexfatal(_("_tempnam(main)"));
+-	  flex_temp_out_main = _strdup(p);
+-	}
+-
+ 	printstats = syntaxerror = trace = spprdflt = false;
+ 	lex_compat = posix_compat = C_plus_plus = backing_up_report =
+ 		ddebug = fulltbl = false;

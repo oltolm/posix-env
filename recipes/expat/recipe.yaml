@@ -1,0 +1,49 @@
+context:
+  version: "2.8.5"
+
+package:
+  name: expat
+  version: ${{ version }}
+
+source:
+  url: https://github.com/libexpat/libexpat/releases/download/R_${{ version | replace('.', '_') }}/expat-${{ version }}.tar.xz
+  sha256: 1e727b8933ec51a77a9a9d9afcf8e688bce45d907c13e36ab7393fe36e703182
+
+build:
+  number: 2
+  script:
+    interpreter: brush
+    content:
+      # The release's configure; MSYS2 uses CMake.  libgcc is linked
+      # statically: the toolchain's DLLs are not part of any environment.
+      - >-
+        ./configure --prefix="$PREFIX" --enable-shared --disable-static
+        --without-examples --without-tests --without-docbook
+        CC="gcc -static-libgcc" lt_cv_deplibs_check_method=pass_all
+      - make -j"$(nproc)"
+      - make install
+
+requirements:
+  run_exports:
+    - ${{ pin_subpackage('expat', upper_bound='x') }}
+  build:
+    - posix-env
+
+tests:
+  - script:
+      interpreter: cmd
+      content:
+        - echo ^<a^>^<b/^>^</a^>> t.xml
+        - xmlwf t.xml || exit /b 1
+  - package_contents:
+      files:
+        - bin/libexpat-1.dll
+        - lib/libexpat.dll.a
+        - lib/pkgconfig/expat.pc
+        - include/expat.h
+
+about:
+  homepage: https://libexpat.github.io/
+  license: MIT
+  license_file: COPYING
+  summary: Stream-oriented XML parser library

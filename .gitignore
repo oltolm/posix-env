@@ -1,0 +1,7 @@
+# The local channel and rattler-build's work directories.
+/output/
+# micromamba's package cache and test environments.
+/.mamba/
+/.envs/
+# Downloaded by tools/fetch.ps1.
+/tools/*.exe

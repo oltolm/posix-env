@@ -1,0 +1,42 @@
+context:
+  version: "4.2.2"
+
+package:
+  name: mpfr
+  version: ${{ version }}
+
+source:
+  url: https://ftpmirror.gnu.org/gnu/mpfr/mpfr-${{ version }}.tar.xz
+  sha256: b67ba0383ef7e8a8563734e2e889ef5ec3c3b898a01d00fa0a6869ad81c6ce01
+
+build:
+  number: 1
+  script:
+    interpreter: brush
+    content:
+      # libgcc is linked statically: the toolchain's DLLs are not part of
+      # any environment.
+      - ./configure CC="gcc -static-libgcc" --prefix="$PREFIX" --with-gmp="$PREFIX" --enable-shared --disable-static
+      - make -j"$(nproc)"
+      - make install
+
+requirements:
+  run_exports:
+    - ${{ pin_subpackage('mpfr', upper_bound='x') }}
+  build:
+    - posix-env
+  host:
+    - gmp
+
+tests:
+  - package_contents:
+      files:
+        - bin/libmpfr-6.dll
+        - lib/libmpfr.dll.a
+        - include/mpfr.h
+
+about:
+  homepage: https://www.mpfr.org/
+  license: LGPL-3.0-or-later
+  license_file: COPYING.LESSER
+  summary: Multiple-precision floating-point computations with correct rounding

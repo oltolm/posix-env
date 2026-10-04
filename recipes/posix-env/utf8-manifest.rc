@@ -1,0 +1,4 @@
+/* The UTF-8 manifest, as a resource object that config.site links into
+   every program.  */
+#include <winuser.h>
+CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "utf8.manifest"

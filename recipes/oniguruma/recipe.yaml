@@ -1,0 +1,40 @@
+context:
+  version: "6.9.10"
+
+package:
+  name: oniguruma
+  version: ${{ version }}
+
+source:
+  url: https://github.com/kkos/oniguruma/releases/download/v${{ version }}/onig-${{ version }}.tar.gz
+  sha256: 2a5cfc5ae259e4e97f86b68dfffc152cdaffe94e2060b770cb827238d769fc05
+
+build:
+  number: 1
+  script:
+    interpreter: brush
+    content:
+      - ./configure --prefix="$PREFIX" --enable-posix-api --enable-shared --disable-static
+      - make -j"$(nproc)"
+      - make install
+      - rm -f "$PREFIX/lib/libonig.def"
+
+requirements:
+  run_exports:
+    - ${{ pin_subpackage('oniguruma', upper_bound='x') }}
+  build:
+    - posix-env
+
+tests:
+  - package_contents:
+      files:
+        - bin/libonig-5.dll
+        - lib/libonig.dll.a
+        - lib/pkgconfig/oniguruma.pc
+        - include/oniguruma.h
+
+about:
+  homepage: https://github.com/kkos/oniguruma
+  license: BSD-2-Clause
+  license_file: COPYING
+  summary: Regular expression library

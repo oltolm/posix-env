@@ -1,0 +1,86 @@
+Base the default AWKPATH and AWKLIBPATH on where gawk.exe is installed.
+
+DEFPATH and DEFLIBPATH are compiled in from the build prefix; conda does
+not relocate paths inside binaries on Windows, so an installed gawk looked
+for its awk library in the build directory.
+
+diff --git a/main.c b/main.c
+index d8f7750..85139b8 100644
+--- a/main.c
++++ b/main.c
+@@ -242,6 +242,11 @@ main(int argc, char **argv)
+ 
+ 	os_arg_fixup(&argc, &argv); /* emulate redirection, expand wildcards */
+ 
++#ifdef __MINGW32__
++	/* Before the options: -i and -l look up their files right away.  */
++	w32_relocate_default_paths();
++#endif
++
+ 	if (argc < 2)
+ 		usage(EXIT_FAILURE, stderr);
+ 
+diff --git a/nonposix.h b/nonposix.h
+index ef08977..0fe51aa 100644
+--- a/nonposix.h
++++ b/nonposix.h
+@@ -53,6 +53,7 @@ unsigned int getgid (void);
+ unsigned int getegid (void);
+ 
+ /* gawkmisc.pc */
++void w32_relocate_default_paths (void);
+ int unsetenv (const char *);
+ int setenv (const char *, const char *, int);
+ char *w32_setlocale (int, const char *);
+diff --git a/pc/gawkmisc.pc b/pc/gawkmisc.pc
+index 9fac06a..dddcd2f 100644
+--- a/pc/gawkmisc.pc
++++ b/pc/gawkmisc.pc
+@@ -51,6 +51,47 @@ const char *deflibpath = DEFLIBPATH;
+ #define WIN32_LEAN_AND_MEAN
+ #include <windows.h>
+ 
++/* w32_relocate_default_paths --- base the default AWKPATH and AWKLIBPATH on
++   where gawk.exe is installed.  DEFPATH and DEFLIBPATH name the prefix gawk
++   was built for, which a relocated installation does not have.  gawk.exe is
++   in PREFIX/bin, the awk library in PREFIX/lib/awk and extensions in
++   PREFIX/lib/gawk; without that layout the compiled-in values stay.  */
++
++void
++w32_relocate_default_paths (void)
++{
++	static const char tail[] = ";c:/lib/awk;c:/gnu/lib/awk";
++	char exe[MAX_PATH];
++	char *p, *path, *libpath;
++	DWORD n = GetModuleFileNameA (NULL, exe, sizeof exe);
++
++	if (n == 0 || n >= sizeof exe)
++		return;
++	for (p = exe; *p; p++)
++		if (*p == '\\')
++			*p = '/';
++	/* Strip "/gawk.exe", then "/bin".  */
++	if ((p = strrchr (exe, '/')) == NULL)
++		return;
++	*p = '\0';
++	if ((p = strrchr (exe, '/')) == NULL || stricmp (p, "/bin") != 0)
++		return;
++	*p = '\0';
++
++	path = malloc (strlen (".;") + strlen (exe) + strlen ("/lib/awk")
++		       + strlen (tail) + 1);
++	libpath = malloc (strlen (exe) + strlen ("/lib/gawk") + 1);
++	if (path == NULL || libpath == NULL) {
++		free (path);
++		free (libpath);
++		return;
++	}
++	sprintf (path, ".;%s/lib/awk%s", exe, tail);
++	sprintf (libpath, "%s/lib/gawk", exe);
++	defpath = path;
++	deflibpath = libpath;
++}
++
+ /* gawk_name --- pull out the "gawk" part from how the OS called us */
+ 
+ const char *

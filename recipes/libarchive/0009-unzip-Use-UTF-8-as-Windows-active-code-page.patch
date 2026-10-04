@@ -1,0 +1,27 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Sun, 4 Oct 2026 20:32:29 +0200
+Subject: [PATCH] unzip: Use UTF-8 as Windows active code page
+
+As bsdtar does: command-line arguments, file names and narrow Windows API
+calls are then UTF-8, and names outside the system code page survive.
+---
+ unzip/bsdunzip.exe.manifest | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/unzip/bsdunzip.exe.manifest b/unzip/bsdunzip.exe.manifest
+index 32142e9..50f6434 100644
+--- a/unzip/bsdunzip.exe.manifest
++++ b/unzip/bsdunzip.exe.manifest
+@@ -8,8 +8,10 @@
+     </security>
+   </trustInfo>
+   <application xmlns="urn:schemas-microsoft-com:asm.v3">
+-    <windowsSettings xmlns:ws2="http://schemas.microsoft.com/SMI/2016/WindowsSettings">
++    <windowsSettings xmlns:ws2="http://schemas.microsoft.com/SMI/2016/WindowsSettings"
++        xmlns:ws3="http://schemas.microsoft.com/SMI/2019/WindowsSettings">
+       <ws2:longPathAware>true</ws2:longPathAware>
++      <ws3:activeCodePage>UTF-8</ws3:activeCodePage>
+     </windowsSettings>
+   </application>
+ </assembly>

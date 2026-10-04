@@ -1,0 +1,32 @@
+# Site defaults for configure scripts run in the native POSIX environment;
+# the posix-env activation script points CONFIG_SITE here.  Paths are
+# derived from this file's location, <prefix>/share/posix-env.
+posix_env_bin=${CONFIG_SITE%/share/posix-env/*}/bin
+
+# config.guess recognizes MinGW only by MSYS's uname -s (MINGW64_NT-...);
+# the native uname reports Windows_NT.
+test -n "$build_alias" || build_alias=$(uname -m)-w64-mingw32
+
+# Autoconf's program search tries "gcc", never "gcc.exe".
+: ${ac_executable_extensions=.exe}
+
+# AC_PROG_SED and AC_PROG_GREP search all of PATH for the "best" program and
+# can pick a text-mode one from the toolchain directory, which writes CRLF.
+: ${SED=$posix_env_bin/sed.exe}
+: ${GREP=$posix_env_bin/grep.exe}
+: ${EGREP="$posix_env_bin/grep.exe -E"}
+: ${FGREP="$posix_env_bin/grep.exe -F"}
+
+# Without a file command, libtool 2.2.x falls back to an i386-only pattern and
+# builds no DLL that depends on an x86-64 import library.  Both are computed
+# in one cached check, so both must be set.
+: ${lt_cv_deplibs_check_method='file_magic file format (pei*-i386(.*architecture: i386)?|pe-arm-wince|pei?-x86-64)'}
+: ${lt_cv_file_magic_cmd='$OBJDUMP -f'}
+
+# With build and host both MinGW, libtool assumes MSYS and converts paths
+# with "cmd //c echo", which starts an interactive cmd.exe here.  Paths are
+# Windows paths already.
+: ${lt_cv_to_host_file_cmd=func_convert_file_noop}
+: ${lt_cv_to_tool_file_cmd=func_convert_file_noop}
+
+unset posix_env_bin

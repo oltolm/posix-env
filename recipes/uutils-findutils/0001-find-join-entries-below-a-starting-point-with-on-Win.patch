@@ -1,0 +1,494 @@
+From 80e5064c5abbd64c13ad9ea9de957823f37e3c4f Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Sun, 4 Oct 2026 12:23:43 +0200
+Subject: [PATCH] find: join entries below a starting point with `/` on
+ Windows
+
+---
+ src/find/matchers/entry.rs   | 64 ++++++++++++++++++++++++++++++++++++
+ src/find/matchers/exec.rs    | 24 +++++++++++---
+ src/find/matchers/mod.rs     |  3 +-
+ src/find/matchers/path.rs    |  6 ----
+ src/find/matchers/regex.rs   |  6 ----
+ src/find/mod.rs              | 11 ++-----
+ tests/common/test_helpers.rs | 12 ++-----
+ tests/exec_unit_tests.rs     | 32 +++++++++++++-----
+ tests/find_exec_tests.rs     | 24 ++++++++++----
+ tests/test_find.rs           | 32 +++---------------
+ 10 files changed, 137 insertions(+), 77 deletions(-)
+
+diff --git a/src/find/matchers/entry.rs b/src/find/matchers/entry.rs
+index 649413d..c1b1b9f 100644
+--- a/src/find/matchers/entry.rs
++++ b/src/find/matchers/entry.rs
+@@ -203,6 +203,38 @@ pub struct WalkEntry {
+     follow: Follow,
+     /// Cached metadata.
+     meta: OnceCell<Result<Metadata, WalkError>>,
++    /// The path as find reports it, when that differs from the walked path.
++    reported_path: Option<PathBuf>,
++}
++
++/// Like GNU find, name entries below a starting point by appending `/` and
++/// the file name. walkdir joins them with `\` on Windows, which scripts that
++/// paste find's output into `eval` or sed (libtool does) cannot handle.
++#[cfg(windows)]
++fn reported_path(path: &Path, depth: usize) -> Option<PathBuf> {
++    let s = path.to_str()?;
++    // Windows file names cannot contain `\`, so the last `depth` backslashes
++    // are exactly the separators walkdir added below the starting point.
++    let mut bytes = s.as_bytes().to_vec();
++    let mut left = depth;
++    for b in bytes.iter_mut().rev() {
++        if left == 0 {
++            break;
++        }
++        if *b == b'\\' {
++            *b = b'/';
++            left -= 1;
++        }
++    }
++    if left != 0 {
++        return None;
++    }
++    String::from_utf8(bytes).ok().map(PathBuf::from)
++}
++
++#[cfg(not(windows))]
++fn reported_path(_path: &Path, _depth: usize) -> Option<PathBuf> {
++    None
+ }
+ 
+ impl WalkEntry {
+@@ -212,6 +244,7 @@ impl WalkEntry {
+             inner: Entry::Explicit(path.into(), depth),
+             follow,
+             meta: OnceCell::new(),
++            reported_path: None,
+         }
+     }
+ 
+@@ -230,6 +263,7 @@ impl WalkEntry {
+                     Self::new(entry.path(), 0, follow)
+                 } else {
+                     Self {
++                        reported_path: reported_path(entry.path(), entry.depth()),
+                         inner: Entry::WalkDir(entry),
+                         follow,
+                         meta: OnceCell::new(),
+@@ -242,6 +276,7 @@ impl WalkEntry {
+                 if let (Some(path), Some(depth)) = (e.path(), e.depth()) {
+                     if let Ok(meta) = path.symlink_metadata() {
+                         return Ok(Self {
++                            reported_path: reported_path(path, depth),
+                             inner: Entry::Explicit(path.into(), depth),
+                             follow: Follow::Never,
+                             meta: Ok(meta).into(),
+@@ -257,6 +292,9 @@ impl WalkEntry {
+ 
+     /// Get the path to this entry.
+     pub fn path(&self) -> &Path {
++        if let Some(path) = &self.reported_path {
++            return path;
++        }
+         match &self.inner {
+             Entry::Explicit(path, _) => path.as_path(),
+             Entry::WalkDir(ent) => ent.path(),
+@@ -265,6 +303,9 @@ impl WalkEntry {
+ 
+     /// Get the path to this entry.
+     pub fn into_path(self) -> PathBuf {
++        if let Some(path) = self.reported_path {
++            return path;
++        }
+         match self.inner {
+             Entry::Explicit(path, _) => path,
+             Entry::WalkDir(ent) => ent.into_path(),
+@@ -338,3 +379,26 @@ impl WalkEntry {
+         }
+     }
+ }
++
++#[cfg(all(test, windows))]
++mod tests {
++    use super::reported_path;
++    use std::path::{Path, PathBuf};
++
++    #[test]
++    fn reported_path_joins_below_start_with_slash() {
++        // The starting point keeps its own spelling; only walkdir's separators change.
++        assert_eq!(
++            reported_path(Path::new(r".libs/x.lax\a.a\print.o"), 2),
++            Some(PathBuf::from(".libs/x.lax/a.a/print.o"))
++        );
++        assert_eq!(
++            reported_path(Path::new(r"C:\src\dir\f.o"), 1),
++            Some(PathBuf::from(r"C:\src\dir/f.o"))
++        );
++        assert_eq!(
++            reported_path(Path::new("start"), 0),
++            Some(PathBuf::from("start"))
++        );
++    }
++}
+diff --git a/src/find/matchers/exec.rs b/src/find/matchers/exec.rs
+index c061e26..9b95f74 100644
+--- a/src/find/matchers/exec.rs
++++ b/src/find/matchers/exec.rs
+@@ -8,11 +8,25 @@ use std::cell::RefCell;
+ use std::error::Error;
+ use std::ffi::OsString;
+ use std::io::{stderr, Write};
+-use std::path::Path;
++use std::path::{Component, Path, PathBuf};
+ use std::process::Command;
+ 
+ use super::{Matcher, MatcherIO, WalkEntry};
+ 
++/// `./NAME`, as GNU find passes it to -execdir commands; `Path::join` would
++/// produce `.\NAME` on Windows.
++fn dot_slash(path: &Path) -> PathBuf {
++    if matches!(
++        path.components().next(),
++        Some(Component::Prefix(_) | Component::RootDir)
++    ) {
++        return Path::new(".").join(path);
++    }
++    let mut s = OsString::from("./");
++    s.push(path);
++    s.into()
++}
++
+ enum Arg {
+     FileArg(Vec<OsString>),
+     LiteralArg(OsString),
+@@ -72,9 +86,9 @@ impl Matcher for SingleExecMatcher {
+     fn matches(&self, file_info: &WalkEntry, matcher_io: &mut MatcherIO) -> bool {
+         let path_to_file = if self.exec_in_parent_dir {
+             if let Some(f) = file_info.path().file_name() {
+-                Path::new(".").join(f)
++                dot_slash(Path::new(f))
+             } else {
+-                Path::new(".").join(file_info.path())
++                dot_slash(file_info.path())
+             }
+         } else {
+             file_info.path().to_path_buf()
+@@ -193,9 +207,9 @@ impl Matcher for MultiExecMatcher {
+     fn matches(&self, file_info: &WalkEntry, matcher_io: &mut MatcherIO) -> bool {
+         let path_to_file = if self.exec_in_parent_dir {
+             if let Some(f) = file_info.path().file_name() {
+-                Path::new(".").join(f)
++                dot_slash(Path::new(f))
+             } else {
+-                Path::new(".").join(file_info.path())
++                dot_slash(file_info.path())
+             }
+         } else {
+             file_info.path().to_path_buf()
+diff --git a/src/find/matchers/mod.rs b/src/find/matchers/mod.rs
+index e35ebbb..0009462 100644
+--- a/src/find/matchers/mod.rs
++++ b/src/find/matchers/mod.rs
+@@ -1072,11 +1072,12 @@ mod tests {
+         let root = fix_up_slashes(root);
+         let root = Path::new(&root);
+ 
++        // Name the entry as a walk would: the starting point, `/`, the rest.
+         let path = fix_up_slashes(path);
+         let path = if path.is_empty() {
+             root.to_owned()
+         } else {
+-            root.join(path)
++            std::path::PathBuf::from(format!("{}/{path}", root.display()))
+         };
+ 
+         let depth = path.components().count() - root.components().count();
+diff --git a/src/find/matchers/path.rs b/src/find/matchers/path.rs
+index c9db349..62c5d2e 100644
+--- a/src/find/matchers/path.rs
++++ b/src/find/matchers/path.rs
+@@ -35,12 +35,6 @@ mod tests {
+ 
+     // Variants of fix_up_slashes that properly escape the forward slashes for
+     // being in a glob.
+-    #[cfg(windows)]
+-    fn fix_up_glob_slashes(re: &str) -> String {
+-        re.replace("/", "\\\\")
+-    }
+-
+-    #[cfg(not(windows))]
+     fn fix_up_glob_slashes(re: &str) -> String {
+         re.to_owned()
+     }
+diff --git a/src/find/matchers/regex.rs b/src/find/matchers/regex.rs
+index 4b85e4d..e673a39 100644
+--- a/src/find/matchers/regex.rs
++++ b/src/find/matchers/regex.rs
+@@ -124,12 +124,6 @@ mod tests {
+ 
+     // Variants of fix_up_slashes that properly escape the forward slashes for
+     // being in a regex.
+-    #[cfg(windows)]
+-    fn fix_up_regex_slashes(re: &str) -> String {
+-        re.replace("/", r"\\")
+-    }
+-
+-    #[cfg(not(windows))]
+     fn fix_up_regex_slashes(re: &str) -> String {
+         re.to_owned()
+     }
+diff --git a/src/find/mod.rs b/src/find/mod.rs
+index f6b8075..9e0c667 100644
+--- a/src/find/mod.rs
++++ b/src/find/mod.rs
+@@ -447,14 +447,9 @@ mod tests {
+ 
+     use super::*;
+ 
+-    #[cfg(windows)]
+-    /// Windows-only bodge for converting between path separators.
+-    pub fn fix_up_slashes(path: &str) -> String {
+-        path.replace("/", "\\")
+-    }
+-
+-    #[cfg(not(windows))]
+-    /// Do nothing equivalent of the above for non-windows systems.
++    /// find joins entries below a starting point with `/` on every platform,
++    /// as GNU find does, so expected output only depends on how the starting
++    /// point is spelled and needs no conversion.
+     pub fn fix_up_slashes(path: &str) -> String {
+         path.to_string()
+     }
+diff --git a/tests/common/test_helpers.rs b/tests/common/test_helpers.rs
+index acf5a52..a99d5d9 100644
+--- a/tests/common/test_helpers.rs
++++ b/tests/common/test_helpers.rs
+@@ -85,15 +85,6 @@ pub fn path_to_testing_commandline() -> String {
+     path_to_use.to_string_lossy().to_string()
+ }
+ 
+-#[cfg(windows)]
+-/// A copy of find::tests::fix_up_slashes.
+-/// TODO: find out how to share #[cfg(test)] functions/structs between unit
+-/// and integration tests.
+-pub fn fix_up_slashes(path: &str) -> String {
+-    path.replace("/", "\\")
+-}
+-
+-#[cfg(not(windows))]
+ pub fn fix_up_slashes(path: &str) -> String {
+     path.to_string()
+ }
+@@ -106,10 +97,11 @@ pub fn get_dir_entry_for(root: &str, path: &str) -> WalkEntry {
+     let root = Path::new(&root);
+ 
+     let path = fix_up_slashes(path);
++    // Name the entry as a walk would: the starting point, `/`, the rest.
+     let path = if path.is_empty() {
+         root.to_owned()
+     } else {
+-        root.join(path)
++        std::path::PathBuf::from(format!("{}/{path}", root.display()))
+     };
+ 
+     let depth = path.components().count() - root.components().count();
+diff --git a/tests/exec_unit_tests.rs b/tests/exec_unit_tests.rs
+index e37ad2a..d137f56 100644
+--- a/tests/exec_unit_tests.rs
++++ b/tests/exec_unit_tests.rs
+@@ -78,8 +78,12 @@ fn matching_executes_code_in_files_directory() {
+     assert_eq!(
+         s,
+         fix_up_slashes(&format!(
+-            "cwd={}/test_data/simple\nargs=\nabc\n./abbbc\nxyz\n",
+-            env::current_dir().unwrap().to_string_lossy()
++            "cwd={}\nargs=\nabc\n./abbbc\nxyz\n",
++            env::current_dir()
++                .unwrap()
++                .join("test_data")
++                .join("simple")
++                .to_string_lossy()
+         ))
+     );
+ }
+@@ -218,9 +222,13 @@ fn matching_fails_if_executable_fails() {
+     assert_eq!(
+         s,
+         fix_up_slashes(&format!(
+-            "cwd={}/test_data/simple\nargs=\n--exit_with_failure\nabc\n.\
++            "cwd={}\nargs=\n--exit_with_failure\nabc\n.\
+              /abbbc\nxyz\n",
+-            env::current_dir().unwrap().to_string_lossy()
++            env::current_dir()
++                .unwrap()
++                .join("test_data")
++                .join("simple")
++                .to_string_lossy()
+         ))
+     );
+ }
+@@ -366,8 +374,12 @@ fn multi_set_exit_code_if_executable_fails() {
+     assert_eq!(
+         s,
+         fix_up_slashes(&format!(
+-            "cwd={}/test_data/simple\nargs=\n--exit_with_failure\nabc\n./abbbc\n",
+-            env::current_dir().unwrap().to_string_lossy()
++            "cwd={}\nargs=\n--exit_with_failure\nabc\n./abbbc\n",
++            env::current_dir()
++                .unwrap()
++                .join("test_data")
++                .join("simple")
++                .to_string_lossy()
+         ))
+     );
+ }
+@@ -480,8 +492,12 @@ fn okdir_executes_in_parent_dir_when_confirmed() {
+     assert_eq!(
+         s,
+         fix_up_slashes(&format!(
+-            "cwd={}/test_data/simple\nargs=\nabc\n./abbbc\nxyz\n",
+-            env::current_dir().unwrap().to_string_lossy()
++            "cwd={}\nargs=\nabc\n./abbbc\nxyz\n",
++            env::current_dir()
++                .unwrap()
++                .join("test_data")
++                .join("simple")
++                .to_string_lossy()
+         ))
+     );
+ }
+diff --git a/tests/find_exec_tests.rs b/tests/find_exec_tests.rs
+index 7b2b9f5..dee1d50 100644
+--- a/tests/find_exec_tests.rs
++++ b/tests/find_exec_tests.rs
+@@ -178,8 +178,13 @@ fn find_execdir() {
+     assert_eq!(
+         s,
+         fix_up_slashes(&format!(
+-            "cwd={}/test_data/simple/subdir\nargs=\n)\n./ABBBC\n,\n",
+-            env::current_dir().unwrap().to_string_lossy()
++            "cwd={}\nargs=\n)\n./ABBBC\n,\n",
++            env::current_dir()
++                .unwrap()
++                .join("test_data")
++                .join("simple")
++                .join("subdir")
++                .to_string_lossy()
+         ))
+     );
+ }
+@@ -270,8 +275,11 @@ fn find_execdir_multi() {
+     assert_eq!(
+         s,
+         fix_up_slashes(&format!(
+-            "cwd={}/test_data\nargs=\n)\n--sort\n./simple\n",
+-            env::current_dir().unwrap().to_string_lossy()
++            "cwd={}\nargs=\n)\n--sort\n./simple\n",
++            env::current_dir()
++                .unwrap()
++                .join("test_data")
++                .to_string_lossy()
+         ))
+     );
+     let mut f = File::open(temp_dir.path().join("2.txt")).expect("Failed to open output file");
+@@ -281,8 +289,12 @@ fn find_execdir_multi() {
+     assert_eq!(
+         s,
+         fix_up_slashes(&format!(
+-            "cwd={}/test_data/simple\nargs=\n)\n--sort\n./abbbc\n./subdir\n",
+-            env::current_dir().unwrap().to_string_lossy()
++            "cwd={}\nargs=\n)\n--sort\n./abbbc\n./subdir\n",
++            env::current_dir()
++                .unwrap()
++                .join("test_data")
++                .join("simple")
++                .to_string_lossy()
+         ))
+     );
+ }
+diff --git a/tests/test_find.rs b/tests/test_find.rs
+index ce223d5..b7e9e13 100644
+--- a/tests/test_find.rs
++++ b/tests/test_find.rs
+@@ -9,7 +9,6 @@ use regex::Regex;
+ use std::fs::{self, File};
+ use std::io::ErrorKind;
+ use std::io::{Read, Write};
+-use std::path::Path;
+ use std::time;
+ use tempfile::Builder;
+ use uutests::util::TestScenario;
+@@ -35,12 +34,6 @@ fn ucmd() -> uutests::util::UCommand {
+ 
+ // Variants of fix_up_slashes that properly escape the forward slashes for
+ // use in a regex.
+-#[cfg(windows)]
+-fn fix_up_regex_slashes(re: &str) -> String {
+-    re.replace("/", "\\\\")
+-}
+-
+-#[cfg(not(windows))]
+ fn fix_up_regex_slashes(re: &str) -> String {
+     re.to_owned()
+ }
+@@ -394,10 +387,7 @@ fn empty_files() {
+         .args(&[temp_dir_path, "-empty"])
+         .succeeds()
+         .no_stderr()
+-        .stdout_only(fix_up_slashes(&format!(
+-            "{}\n",
+-            test_file_path.to_string_lossy()
+-        )));
++        .stdout_only(format!("{temp_dir_path}/test\n"));
+ 
+     let subdir_path = temp_dir.path().join("subdir");
+     std::fs::create_dir(&subdir_path).unwrap();
+@@ -406,11 +396,7 @@ fn empty_files() {
+         .args(&[temp_dir_path, "-empty", "-sorted"])
+         .succeeds()
+         .no_stderr()
+-        .stdout_only(fix_up_slashes(&format!(
+-            "{}\n{}\n",
+-            subdir_path.to_string_lossy(),
+-            test_file_path.to_string_lossy()
+-        )));
++        .stdout_only(format!("{temp_dir_path}/subdir\n{temp_dir_path}/test\n"));
+ 
+     write!(test_file, "x").unwrap();
+     test_file.sync_all().unwrap();
+@@ -419,10 +405,7 @@ fn empty_files() {
+         .args(&[temp_dir_path, "-empty", "-sorted"])
+         .succeeds()
+         .no_stderr()
+-        .stdout_only(fix_up_slashes(&format!(
+-            "{}\n",
+-            subdir_path.to_string_lossy(),
+-        )));
++        .stdout_only(format!("{temp_dir_path}/subdir\n"));
+ }
+ 
+ #[test]
+@@ -1001,7 +984,7 @@ fn find_samefile() {
+     ucmd()
+         .args(&[temp_dir_path, "-samefile", test_file_str])
+         .succeeds()
+-        .stdout_contains(fix_up_slashes(test_file_str))
++        .stdout_contains(format!("{temp_dir_path}/abbbc"))
+         .no_stderr();
+ 
+     // test not exist file
+@@ -1221,12 +1204,7 @@ fn find_ok_prompt_format() {
+         ])
+         .pipe_in("n\n")
+         .succeeds()
+-        .stderr_contains(format!(
+-            "< echo ... {} > ? ",
+-            Path::new("test_data/simple")
+-                .join("abbbc")
+-                .to_string_lossy()
+-        ));
++        .stderr_contains("< echo ... test_data/simple/abbbc > ? ");
+ }
+ 
+ #[test]

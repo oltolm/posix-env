@@ -1,0 +1,67 @@
+# A snapshot of brush's development branch: the Windows fixes need code
+# from after the 0.4.0 release.  Patches 0001-0018 are the ones of MSYS2's
+# mingw-w64-brush; all come from C:\src\brush, branch windows-native.
+context:
+  commit: 8b539ddbb0b265d2703d841b48933d6de601cfc2
+
+package:
+  name: brush
+  version: 0.4.0.post177
+
+source:
+  - url: https://github.com/reubeno/brush/archive/${{ commit }}.tar.gz
+    sha256: 499251a450aa4165aea0cb69cb11a15b81b4332d9cb8a520e1b4c896fbab17fe
+    patches:
+      - 0001-fix-windows-don-t-refuse-to-spawn-commands-while-fds.patch
+      - 0002-feat-windows-enable-the-exec-builtin.patch
+      - 0003-fix-windows-use-forward-slashes-in-PWD-OLDPWD-and-pw.patch
+      - 0004-feat-windows-run-scripts-through-their-interpreter.patch
+      - 0005-fix-windows-treat-directories-as-executable-in-test-.patch
+      - 0006-feat-windows-accept-POSIX-signal-names-and-numbers-i.patch
+      - 0007-fix-run-compound-pipeline-stages-concurrently.patch
+      - 0008-fix-don-t-deadlock-on-here-docs-larger-than-the-pipe.patch
+      - 0009-feat-windows-add-the-umask-builtin.patch
+      - 0010-fix-windows-convert-CRLF-to-LF-in-command-substituti.patch
+      - 0011-fix-parser-remove-backslashes-inside-backquotes-as-P.patch
+      - 0012-fix-windows-join-PATH-entries-and-command-names-with.patch
+      - 0013-fix-windows-quote-wildcard-arguments-passed-to-nativ.patch
+      - 0014-fix-run-function-calls-in-pipelines-concurrently.patch
+      - 0015-feat-windows-replace-known-faulty-libtool-and-gettex.patch
+      - 0016-feat-windows-implement-test-ef.patch
+      - 0017-fix-pass-the-shell-s-own-stdout-stderr-to-children-a.patch
+      - 0018-fix-windows-resolve-a-relative-program-path-against-.patch
+      - 0019-fix-windows-spell-the-spawned-program-path-with-back.patch
+      - 0020-fix-ignore-break-and-continue-outside-a-loop-as-bash.patch
+      - 0021-feat-windows-replace-libtool-s-MSYS-path-conversion.patch
+      - 0022-fix-keep-command-substitution-output-that-is-not-UTF.patch
+      - 0023-fix-parser-don-t-take-esac-for-a-case-pattern.patch
+  - url: https://github.com/reubeno/brush/releases/download/brush-shell-v0.4.0/brush-docs.tar.gz
+    sha256: 1070fa3a9470927c0c3d9c5417151f1b8f72317b42bed21f33e5fd4f3dad3332
+    target_directory: docs
+
+build:
+  number: 3
+  script:
+    interpreter: brush
+    file: build.sh
+
+requirements:
+  build:
+    - posix-env
+
+tests:
+  # The post-link script has run: sh and bash exist.
+  - script:
+      interpreter: cmd
+      content:
+        - brush --version
+        - sh -c "test $((6 * 7)) = 42" || exit /b 1
+        - bash -c "f() { echo ok; }; f" | findstr /b ok || exit /b 1
+        # esac and a subshell's ")" on one line (patch 0023).
+        - sh -c "(case x in x) echo ok;; esac)" | findstr /b ok || exit /b 1
+
+about:
+  homepage: https://github.com/reubeno/brush
+  license: MIT
+  license_file: LICENSE
+  summary: Bash-compatible shell written in Rust, with fixes for native Windows

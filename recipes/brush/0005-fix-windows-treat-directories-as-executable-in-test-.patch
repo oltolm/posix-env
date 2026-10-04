@@ -1,0 +1,46 @@
+From 4f90189d28d0b5270db9a941fefa9ed6009bb187 Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Thu, 1 Oct 2026 17:00:53 +0200
+Subject: [PATCH 05/21] fix(windows): treat directories as executable in test
+ -x
+
+NTFS has no execute bit and a directory is always searchable, but
+`test -x DIR` was false. Autoconf's shell check requires `test -x /`,
+so configure rejected brush and refused to run.
+
+Assisted-by: Claude Code:claude-opus-5-5
+---
+ brush-core/src/sys/windows/fs.rs | 13 ++++++++++++-
+ 1 file changed, 12 insertions(+), 1 deletion(-)
+
+diff --git a/brush-core/src/sys/windows/fs.rs b/brush-core/src/sys/windows/fs.rs
+index 5000c069..b336a699 100644
+--- a/brush-core/src/sys/windows/fs.rs
++++ b/brush-core/src/sys/windows/fs.rs
+@@ -137,7 +137,8 @@ impl crate::sys::fs::PathExt for Path {
+     }
+ 
+     fn executable(&self) -> bool {
+-        if is_executable_file(self) {
++        // NTFS has no execute bit; a directory is always searchable.
++        if is_executable_file(self) || self.is_dir() {
+             return true;
+         }
+         // Try each PATHEXT extension without allocating a separate PathBuf
+@@ -365,6 +366,16 @@ pub fn normalize_path_separators(s: &str) -> std::borrow::Cow<'_, str> {
+ mod tests {
+     use super::*;
+ 
++    /// NTFS has no execute bit and a directory is always searchable; autoconf's
++    /// shell check requires `test -x /`.
++    #[test]
++    fn directories_are_executable() {
++        use crate::sys::fs::PathExt as _;
++
++        let dir = tempfile::tempdir().unwrap();
++        assert!(dir.path().executable());
++    }
++
+     #[test]
+     fn path_separator_helpers_both_slashes() {
+         assert!(contains_path_separator("foo/bar"));

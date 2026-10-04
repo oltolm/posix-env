@@ -1,0 +1,53 @@
+UTF-8 locales named with "UTF-8" ("de_DE.UTF-8", which the UCRT accepts
+and reports back) were taken for non-UTF-8 ones, while MB_CUR_MAX was 4.
+On that path mbrlenc32 crashed: it passes a null PC32, which
+mingw_mbrtoc32 dereferenced for codepages other than UTF-8.
+
+diff --git a/pc/mbc32.c b/pc/mbc32.c
+--- a/pc/mbc32.c
++++ b/pc/mbc32.c
+@@ -234,9 +234,11 @@
+     {
+       /* Delegate to mbrtowc any non-UTF-8 cases.  */
+       mbstate_t *state16 = ps ? &ps->mbs16 : NULL;
+-      wchar_t ch16 = *pc32 & 0xFFFF;
++      /* mbrlenc32 passes no PC32.  */
++      wchar_t ch16 = pc32 ? *pc32 & 0xFFFF : 0;
+       size_t retval = mbrtowc (&ch16, s, n, state16);
+-      *pc32 = ch16;
++      if (pc32)
++	*pc32 = ch16;
+       return retval;
+     }
+ }
+@@ -304,9 +306,11 @@
+   else
+     {
+       /* Delegate to mbrtowc any non-UTF-8 cases.  */
+-      wchar_t ch16 = *pc32 & 0xFFFF;
++      /* mbrlenc32 passes no PC32.  */
++      wchar_t ch16 = pc32 ? *pc32 & 0xFFFF : 0;
+       size_t retval = mbrtowc (&ch16, s, n, ps);
+-      *pc32 = ch16;
++      if (pc32)
++	*pc32 = ch16;
+       return retval;
+     }
+ }
+diff --git a/pc/nl_langinfo.c b/pc/nl_langinfo.c
+--- a/pc/nl_langinfo.c
++++ b/pc/nl_langinfo.c
+@@ -98,8 +98,11 @@
+              in general and codepage 65001 in particular.  This is
+              what Gnulib's nl_langinfo does.  */
+ 	  if (strcmp (buf + 2, "65001") == 0
+-	      /* Windows 10 and later returns ".utf8" as UTF-8 codeset.  */
+-	      || strcmp (buf + 2, "utf8") == 0)
++	      /* Windows 10 and later returns ".utf8" as UTF-8 codeset; it
++		 also accepts, and then returns, names such as
++		 "de_DE.UTF-8".  */
++	      || _stricmp (buf + 2, "utf8") == 0
++	      || _stricmp (buf + 2, "utf-8") == 0)
+ 	    return (char *) "UTF-8";
+ 	  return codeset;
+ 	}

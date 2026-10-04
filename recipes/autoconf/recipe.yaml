@@ -1,0 +1,71 @@
+context:
+  version: "2.73"
+
+package:
+  name: autoconf
+  version: ${{ version }}
+
+source:
+  url: https://ftpmirror.gnu.org/gnu/autoconf/autoconf-${{ version }}.tar.xz
+  sha256: 9fd672b1c8425fac2fa67fa0477b990987268b90ff36d5f016dae57be0d6b52e
+  # For native Win32 perl.  The branch's 002 (a relocation token for its
+  # relocate.pl) is not needed: conda relocates the installed scripts.
+  patches:
+    - 001-autoconf-win32-perl.patch
+    - 003-autoconf-win32-wait-for-autom4te.patch
+    - 004-autom4te-win32-dev-null.patch
+    - 005-close-files-after-reading.patch
+    - 006-win32-exit-status.patch
+
+build:
+  number: 6
+  script:
+    interpreter: brush
+    file: build.sh
+
+requirements:
+  build:
+    - posix-env
+    - perl
+  host:
+    - scriptexe
+  run:
+    - perl
+    - m4
+
+tests:
+  - requirements:
+      run:
+        - posix-env
+    script:
+      interpreter: cmd
+      content:
+        - autoconf --version
+        - echo AC_INIT([t],[1])> configure.ac
+        - echo AC_CONFIG_HEADERS([config.h])>> configure.ac
+        - echo AC_PROG_CC>> configure.ac
+        - echo AC_OUTPUT>> configure.ac
+        - autoconf || exit /b 1
+        - autoheader || exit /b 1
+        - sh ./configure || exit /b 1
+        # autoheader replaces its own, changed config.h.in.
+        - echo AC_DEFINE([T], [1], [t])>> configure.ac
+        - autoheader || exit /b 1
+        - findstr /b /c:"#undef T" config.h.in || exit /b 1
+        # Also under autoreconf, which reads config.h.in first.  aclocal is
+        # automake's.
+        - autoreconf --version
+        - set ACLOCAL=true
+        - autoreconf -f || exit /b 1
+        # A failing command is reported with its exit status.
+        # (false itself would mean: do not run autoheader.)
+        - set AUTOHEADER=false.exe
+        - 'autoreconf -f 2>&1 | findstr /c:"exit status: 1" || exit /b 1'
+
+about:
+  homepage: https://www.gnu.org/software/autoconf/
+  license: GPL-3.0-or-later WITH Autoconf-exception-3.0
+  license_file:
+    - COPYING
+    - COPYING.EXCEPTION
+  summary: GNU Autoconf, for native Win32 perl

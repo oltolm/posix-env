@@ -1,0 +1,56 @@
+Find the message catalogs below where make.exe is installed.
+
+LOCALEDIR is compiled in from the build prefix; conda does not relocate
+paths inside binaries on Windows.
+
+diff --git a/src/main.c b/src/main.c
+index 43d0feb..b8ccc34 100644
+--- a/src/main.c
++++ b/src/main.c
+@@ -1164,6 +1164,34 @@ temp_stdin_unlink ()
+ extern char **environ;
+ #endif
+ 
++#ifdef WINDOWS32
++/* The message catalogs below where make.exe is installed: make.exe is in
++   PREFIX/bin, the catalogs in PREFIX/share/locale.  LOCALEDIR names the
++   prefix make was built for, which a relocated installation does not have;
++   without that layout it stays.  */
++static const char *
++w32_localedir (void)
++{
++  static char dir[MAX_PATH + sizeof "/share/locale"];
++  char *p;
++  DWORD n = GetModuleFileNameA (NULL, dir, MAX_PATH);
++
++  if (n == 0 || n >= MAX_PATH)
++    return LOCALEDIR;
++  for (p = dir; *p; p++)
++    if (*p == '\\')
++      *p = '/';
++  /* Strip "/make.exe", then "/bin".  */
++  if ((p = strrchr (dir, '/')) == NULL)
++    return LOCALEDIR;
++  *p = '\0';
++  if ((p = strrchr (dir, '/')) == NULL || stricmp (p, "/bin") != 0)
++    return LOCALEDIR;
++  strcpy (p, "/share/locale");
++  return dir;
++}
++#endif
++
+ #if defined(_AMIGA) || defined(MK_OS_ZOS)
+ int
+ main (int argc, char **argv)
+@@ -1248,7 +1276,11 @@ main (int argc, char **argv, char **envp)
+ #endif
+   /* The cast to void shuts up compiler warnings on systems that
+      disable NLS.  */
++#ifdef WINDOWS32
++  (void)bindtextdomain (PACKAGE, w32_localedir ());
++#else
+   (void)bindtextdomain (PACKAGE, LOCALEDIR);
++#endif
+   (void)textdomain (PACKAGE);
+ 
+ #ifdef  POSIX

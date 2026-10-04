@@ -1,0 +1,18 @@
+Win32 perl has no /dev/null file, only the device name nul.
+From the posix-env branch of MINGW-packages (mingw-w64-autoconf).
+
+diff --git a/bin/autom4te.in b/bin/autom4te.in
+index e4810a2..647a70a 100644
+--- a/bin/autom4te.in
++++ b/bin/autom4te.in
+@@ -601,6 +601,10 @@ sub handle_output ($$)
+   # If we are writing to a regular file, replace it atomically.
+   my $scratchfile;
+   my $out;
++  # Win32 perl opens /dev/null as its null device, but -e says it does not
++  # exist, which would mean writing a scratch file in /dev.
++  $output = 'nul'
++    if $^O eq 'MSWin32' && $output eq '/dev/null';
+   if ($output eq '-')
+     {
+       # Don't just make $out be STDOUT, because then we would close STDOUT,

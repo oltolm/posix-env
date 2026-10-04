@@ -1,0 +1,29 @@
+Support llvm-objdump -f output
+From MSYS2's mingw-w64-libtool.
+
+diff --git a/build-aux/ltmain.in b/build-aux/ltmain.in
+index ead91ef..dafeb5f 100644
+--- a/build-aux/ltmain.in
++++ b/build-aux/ltmain.in
+@@ -3258,7 +3258,7 @@ func_win32_libid ()
+   *ar\ archive*) # could be an import, or static
+     # Keep the egrep pattern in sync with the one in _LT_CHECK_MAGIC_METHOD.
+     if eval $OBJDUMP -f $1 | $SED -e '10q' 2>/dev/null |
+-       $EGREP 'file format (pei*-i386(.*architecture: i386)?|pe-arm-wince|pe-x86-64|pe-aarch64)' >/dev/null; then
++       $EGREP 'file format (pei*-i386(.*architecture: i386)?|pe-arm-wince|pe-x86-64|pe-aarch64|coff-arm|coff-arm64|coff-i386|coff-x86-64)' >/dev/null; then
+       case $nm_interface in
+       "MS dumpbin")
+ 	if func_cygming_ms_implib_p "$1" ||
+diff --git a/m4/libtool.m4 b/m4/libtool.m4
+index 96e6c7d..5e6d8d8 100644
+--- a/m4/libtool.m4
++++ b/m4/libtool.m4
+@@ -3729,7 +3729,7 @@ mingw* | windows* | pw32*)
+     lt_cv_file_magic_cmd='func_win32_libid'
+   else
+     # Keep this pattern in sync with the one in func_win32_libid.
+-    lt_cv_deplibs_check_method='file_magic file format (pei*-i386(.*architecture: i386)?|pe-arm-wince|pe-x86-64|pe-aarch64)'
++    lt_cv_deplibs_check_method='file_magic file format (pei*-i386(.*architecture: i386)?|pe-arm-wince|pe-x86-64|pe-aarch64|coff-arm|coff-arm64|coff-i386|coff-x86-64)'
+     lt_cv_file_magic_cmd='$OBJDUMP -f'
+   fi
+   ;;

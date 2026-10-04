@@ -1,0 +1,29 @@
+package:
+  name: scriptexe
+  version: 0.1.0
+
+source:
+  path: scriptexe.c
+
+build:
+  number: 2
+  script:
+    interpreter: brush
+    content:
+      - gcc -O2 -municode -o scriptexe.exe scriptexe.c
+      # Not on PATH: packages copy it as NAME.exe next to their #! script NAME.
+      - mkdir -p "$PREFIX/libexec/posix-env"
+      - cp scriptexe.exe "$PREFIX/libexec/posix-env/"
+
+requirements:
+  build:
+    - posix-env
+
+tests:
+  - package_contents:
+      files:
+        - libexec/posix-env/scriptexe.exe
+
+about:
+  license: MIT
+  summary: Launcher that lets Windows run a "#!" script NAME as NAME.exe

@@ -1,0 +1,53 @@
+context:
+  version: "3.6.5"
+
+package:
+  name: openssl
+  version: ${{ version }}
+
+source:
+  url: https://github.com/openssl/openssl/releases/download/openssl-${{ version }}/openssl-${{ version }}.tar.gz
+  sha256: a2157c2830efdec3788939b00c9b0638306d3f0bbb76dc4832ee503bb397df98
+  patches:
+    # OPENSSLDIR, ENGINESDIR and MODULESDIR follow the installation.
+    - 0001-relocation.patch
+    - 0002-arch-suffix.patch
+
+build:
+  number: 0
+  script:
+    interpreter: brush
+    file: build.sh
+
+requirements:
+  run_exports:
+    - ${{ pin_subpackage('openssl', upper_bound='x') }}
+  build:
+    - posix-env
+    - perl
+  host:
+    - zlib
+
+tests:
+  - script:
+      interpreter: cmd
+      content:
+        - openssl version -a
+        # The directories were relocated: none names the build prefix.
+        - openssl version -d -e -m | findstr /c:"h_env" && exit /b 1 || ver > NUL
+        # Loading the legacy provider needs the relocated MODULESDIR.
+        - openssl list -providers -provider legacy | findstr /c:"legacy" || exit /b 1
+        - echo abc | openssl dgst -sha256 || exit /b 1
+  - package_contents:
+      files:
+        - bin/libcrypto-3-x64.dll
+        - bin/libssl-3-x64.dll
+        - lib/libcrypto.dll.a
+        - lib/pkgconfig/openssl.pc
+        - include/openssl/ssl.h
+
+about:
+  homepage: https://www.openssl.org/
+  license: Apache-2.0
+  license_file: LICENSE.txt
+  summary: TLS/SSL and crypto library

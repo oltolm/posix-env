@@ -1,0 +1,73 @@
+context:
+  version: "2.6.2"
+
+package:
+  name: libtool
+  version: ${{ version }}
+
+source:
+  url: https://ftpmirror.gnu.org/gnu/libtool/libtool-${{ version }}.tar.xz
+  sha256: 2ef1067c16c97db930fd740cc9bc3d3ba9a583804ae5ac42cc3e8719e49e191e
+  # From MSYS2's mingw-w64-libtool, except 0007-msysize, which renames DLLs
+  # for the MSYS target only.
+  patches:
+    - 0001-cygwin-mingw-Create-UAC-manifest-files.patch
+    - 0002-Fix-seems-to-be-moved.patch
+    - 0003-Fix-STRICT_ANSI-vs-POSIX.patch
+    - 0004-Allow-statically-linking-Flang-support-libraries-whe.patch
+    - 0005-libtool-include-process.h.patch
+    - 0006-Pass-various-flags-to-GCC.patch
+    - 0014-Support-llvm-objdump-f-output.patch
+    # Not from MSYS2: PROG.exe in the program searches, and inline-source
+    # recursing through sh.
+    - 0015-windows-programs-and-scripts.patch
+
+build:
+  number: 3
+  script:
+    interpreter: brush
+    file: build.sh
+
+requirements:
+  run_exports:
+    - ${{ pin_subpackage('libtool', upper_bound='x') }}
+  build:
+    - posix-env
+  host:
+    - scriptexe
+
+tests:
+  - requirements:
+      run:
+        - posix-env
+        - autoconf
+        - automake
+    script:
+      interpreter: cmd
+      content:
+        - libtool --version
+        - libtoolize --version
+        # A DLL through LT_INIT: libtoolize, libtool's configure checks and
+        # its link mode.
+        - echo AC_INIT([t],[1])> configure.ac
+        - echo AM_INIT_AUTOMAKE([foreign])>> configure.ac
+        - echo AC_PROG_CC>> configure.ac
+        - echo LT_INIT([win32-dll])>> configure.ac
+        - echo AC_CONFIG_FILES([Makefile])>> configure.ac
+        - echo AC_OUTPUT>> configure.ac
+        - echo lib_LTLIBRARIES = libt.la> Makefile.am
+        - echo libt_la_SOURCES = t.c>> Makefile.am
+        - echo libt_la_LDFLAGS = -no-undefined>> Makefile.am
+        - echo int t (void) { return 0; }> t.c
+        - autoreconf -fi || exit /b 1
+        - sh ./configure || exit /b 1
+        - make || exit /b 1
+        - if not exist .libs\libt-0.dll exit /b 1
+
+about:
+  homepage: https://www.gnu.org/software/libtool/
+  license: GPL-2.0-or-later AND LGPL-2.1-or-later
+  license_file:
+    - COPYING
+    - libltdl/COPYING.LIB
+  summary: GNU libtool and libltdl

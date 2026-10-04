@@ -1,0 +1,71 @@
+Keep forward slashes in paths that go into Makefile.in and aclocal.m4.
+Win32 perl's File::Spec writes backslashes: dirstamp rules such as
+tar\$(DEPDIR)/$(am__dirstamp), which make cannot create, and
+m4_include([build\autoconf/...]) and am__aclocal_m4_deps.  Also abs2rel,
+whose backslashes made %reldir% '.' for fragments included from
+subdirectories.  autom4te reports traced file names in Win32 form;
+aclocal now compares them with forward slashes.
+
+diff --git a/bin/aclocal.in b/bin/aclocal.in
+--- a/bin/aclocal.in
++++ b/bin/aclocal.in
+@@ -29,6 +29,9 @@
+ 
+ use File::Basename;
+ use File::Path ();
++# Paths written into aclocal.m4 and Makefile.in keep forward slashes also
++# with Win32 perl, whose File::Spec would turn them into backslashes.
++use File::Spec::Unix;
+ 
+ use Automake::Config;
+ use Automake::General;
+@@ -402,7 +405,7 @@
+ 	  # Skip some files when running out of srcdir.
+ 	  next if $file eq 'aclocal.m4';
+ 
+-	  my $fullfile = File::Spec->canonpath ("$m4dir/$file");
++	  my $fullfile = File::Spec::Unix->canonpath ("$m4dir/$file");
+ 	  scan_file ($type, $fullfile, 'aclocal');
+ 	}
+       closedir (DIR);
+@@ -815,6 +818,9 @@
+     {
+       chomp;
+       my ($file, $macro, $arg1) = split (/::/);
++      # autom4te reports file names in Win32 form; compare in the form
++      # the files were scanned in.
++      $file =~ tr,\\,/, if $^O eq 'MSWin32';
+ 
+       $traced{$macro} = 1 if exists $macro_seen{$macro};
+ 
+diff --git a/bin/automake.in b/bin/automake.in
+--- a/bin/automake.in
++++ b/bin/automake.in
+@@ -42,6 +42,9 @@
+ use Carp;
+ use File::Basename;
+ use File::Spec;
++# Paths written into Makefile.in keep forward slashes also with Win32
++# perl, whose File::Spec would turn them into backslashes.
++use File::Spec::Unix;
+ 
+ use Automake::Config;
+ BEGIN
+@@ -6758,7 +6761,7 @@
+ 		push_dist_common ("\$\(srcdir\)/$path");
+ 		$path = $relative_dir . "/" . $path if $relative_dir ne '.';
+ 	      }
+-	    my $new_reldir = File::Spec->abs2rel ($path, $relative_dir);
++	    my $new_reldir = File::Spec::Unix->abs2rel ($path, $relative_dir);
+ 	    $new_reldir = '.' if $new_reldir !~ s,/[^/]*$,,;
+ 	    $where->push_context ("'$path' included from here");
+ 	    read_am_file ($path, $where, $new_reldir);
+@@ -7935,7 +7938,7 @@
+ 
+   return $directory_map{$directory} if exists $directory_map{$directory};
+ 
+-  my $cdir = File::Spec->canonpath ($directory);
++  my $cdir = File::Spec::Unix->canonpath ($directory);
+ 
+   if (exists $directory_map{$cdir})
+     {

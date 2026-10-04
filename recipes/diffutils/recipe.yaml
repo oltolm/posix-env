@@ -1,0 +1,61 @@
+context:
+  version: "3.12"
+
+package:
+  name: diffutils
+  version: ${{ version }}
+
+source:
+  url: https://ftpmirror.gnu.org/gnu/diffutils/diffutils-${{ version }}.tar.xz
+  sha256: 7c8b7f9fc8609141fdea9cece85249d308624391ff61dedaf528fcb337727dfd
+
+build:
+  number: 0
+  script:
+    interpreter: brush
+    content:
+      # Options as MSYS2's mingw-w64-diffutils.  C23 is off: gnulib's
+      # strptime.c still has old-style definitions.  WINDOWS_STAT_INODES:
+      # gnulib's stat gives files inode numbers, which diff uses to see
+      # that two names are one file.  libgcc is linked statically: the
+      # toolchain's DLLs are not part of any environment.  Binary I/O
+      # (patches with LF line ends) comes from posix-env's config.site.
+      - >-
+        ./configure --prefix="$PREFIX" --disable-rpath
+        --with-libintl-prefix="$PREFIX" --with-libiconv-prefix="$PREFIX"
+        CC="gcc -static-libgcc" CFLAGS="-O2 -Wno-incompatible-pointer-types"
+        ac_cv_prog_cc_c23=no
+      - make -j"$(nproc)" WINDOWS_STAT_INODES=1
+      - make install
+      - rm -f "$PREFIX/share/info/dir"
+
+requirements:
+  build:
+    - posix-env
+  host:
+    - gettext-runtime
+    - libiconv
+
+tests:
+  - requirements:
+      run:
+        - posix-env
+    script:
+      interpreter: cmd
+      content:
+        - diff --version
+        - cmp --version
+        - sh -c "printf 'a\nc\n' > x; printf 'b\nc\n' > y"
+        - cmp -s x x || exit /b 1
+        - cmp -s x y && exit /b 1 || (call )
+        # Output with LF line ends, byte for byte.
+        - sh -c "diff x y > d.out; printf '1c1\n< a\n---\n> b\n' | cmp - d.out" || exit /b 1
+        - sh -c "diff -u x y | grep -qx +b" || exit /b 1
+        - sh -c "diff3 x x y > /dev/null; test $? -le 1" || exit /b 1
+        - sh -c "sdiff -s x x" || exit /b 1
+
+about:
+  homepage: https://www.gnu.org/software/diffutils/
+  license: GPL-3.0-or-later
+  license_file: COPYING
+  summary: GNU diff, cmp, diff3 and sdiff

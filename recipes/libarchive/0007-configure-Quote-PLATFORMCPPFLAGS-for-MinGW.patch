@@ -1,0 +1,25 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Sun, 4 Oct 2026 17:34:50 +0200
+Subject: [PATCH] configure: Quote PLATFORMCPPFLAGS for MinGW
+
+Unquoted, the shell ran -D__MINGW_USE_VC2005_COMPAT as a command with
+PLATFORMCPPFLAGS=-D__USE_MINGW_ANSI_STDIO in its environment, and
+PLATFORMCPPFLAGS stayed empty.
+---
+ configure.ac | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/configure.ac b/configure.ac
+index 788354d..f62482a 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -107,7 +107,7 @@ AS_IF([test $inc_windows_files = yes], [AC_CHECK_TOOL([WINDRES], [windres])])
+ dnl Defines that are required for specific platforms (e.g. -D_POSIX_SOURCE, etc)
+ PLATFORMCPPFLAGS=
+ case "$host_os" in
+-  *mingw* ) PLATFORMCPPFLAGS=-D__USE_MINGW_ANSI_STDIO -D__MINGW_USE_VC2005_COMPAT ;;
++  *mingw* ) PLATFORMCPPFLAGS="-D__USE_MINGW_ANSI_STDIO -D__MINGW_USE_VC2005_COMPAT" ;;
+ esac
+ AC_SUBST(PLATFORMCPPFLAGS)
+ 

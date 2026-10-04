@@ -1,0 +1,70 @@
+From 050d7f6b673348df221ff0af063d01bd8c58458e Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Fri, 2 Oct 2026 21:09:33 +0200
+Subject: [PATCH 17/21] fix: pass the shell's own stdout/stderr to children
+ after 2>&1 or 1>&2
+
+`2>&1` puts the shell's inherited stdout into fd 2, but converting it for
+a child process yielded `Stdio::inherit()`, which for the stderr slot is
+the shell's stderr.  An external command's stderr therefore bypassed the
+redirection whenever the shell's stdout was inherited, as in a script run
+from a pipe.  autom4te's `echo dumpdef | m4 2>&1 >/dev/null` probe
+printed m4's builtins to the terminal and captured nothing.
+
+Hand the child the shell's actual stdout or stderr instead.
+
+Assisted-by: Claude Code:claude-opus-5-5
+---
+ brush-core/src/openfiles.rs                   |  6 ++++-
+ .../tests/cases/brush/redirection.yaml        | 25 +++++++++++++++++++
+ 2 files changed, 30 insertions(+), 1 deletion(-)
+ create mode 100644 brush-shell/tests/cases/brush/redirection.yaml
+
+diff --git a/brush-core/src/openfiles.rs b/brush-core/src/openfiles.rs
+index f51ece0d..668f0410 100644
+--- a/brush-core/src/openfiles.rs
++++ b/brush-core/src/openfiles.rs
+@@ -238,7 +238,11 @@ impl TryFrom<OpenFile> for Stdio {
+         // fail (e.g. under descriptor exhaustion), so the conversion is fallible and the error is
+         // surfaced to the caller rather than silently degrading the child's streams.
+         match open_file {
+-            OpenFile::Stdin(_) | OpenFile::Stdout(_) | OpenFile::Stderr(_) => Ok(Self::inherit()),
++            OpenFile::Stdin(_) => Ok(Self::inherit()),
++            // After `2>&1` or `1>&2` the shell's own stdout or stderr sits in the other slot;
++            // inheriting would give the child that slot's own stream instead.
++            OpenFile::Stdout(s) => Ok(s.into()),
++            OpenFile::Stderr(s) => Ok(s.into()),
+             OpenFile::File(f) => Ok(f.try_clone()?.into()),
+             OpenFile::PipeReader(r) => Ok(r.try_clone()?.into()),
+             OpenFile::PipeWriter(w) => Ok(w.try_clone()?.into()),
+diff --git a/brush-shell/tests/cases/brush/redirection.yaml b/brush-shell/tests/cases/brush/redirection.yaml
+new file mode 100644
+index 00000000..43931488
+--- /dev/null
++++ b/brush-shell/tests/cases/brush/redirection.yaml
+@@ -0,0 +1,25 @@
++name: "redirection of an external command's standard streams"
++# The shell's own stdout and stderr are pipes it inherited from the harness.
++# Duplicating one onto the other must reach an external command too; "$BASH"
++# runs a second brush as that command.
++cases:
++  - name: "2>&1 sends an external command's stderr to the shell's stdout"
++    stdin: |
++      "$BASH" -c 'echo to-stderr >&2' 2>&1
++    expected_stdout: |
++      to-stderr
++    expected_stderr: ""
++
++  - name: "2>&1 >/dev/null keeps only an external command's stderr"
++    stdin: |
++      "$BASH" -c 'echo to-stderr >&2; echo to-stdout' 2>&1 >/dev/null
++    expected_stdout: |
++      to-stderr
++    expected_stderr: ""
++
++  - name: "1>&2 sends an external command's stdout to the shell's stderr"
++    stdin: |
++      "$BASH" -c 'echo to-stdout' 1>&2
++    expected_stdout: ""
++    expected_stderr: |
++      to-stdout

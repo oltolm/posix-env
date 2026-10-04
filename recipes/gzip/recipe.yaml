@@ -1,0 +1,44 @@
+context:
+  version: "1.15"
+
+package:
+  name: gzip
+  version: ${{ version }}
+
+source:
+  url: https://ftpmirror.gnu.org/gnu/gzip/gzip-${{ version }}.tar.xz
+  sha256: 9aa0cc780dec156b8282844833b342ab7cb08c25d2cd9a1869cdd0df31deff48
+
+build:
+  number: 0
+  script:
+    interpreter: brush
+    file: build.sh
+
+requirements:
+  build:
+    - posix-env
+  host:
+    - scriptexe
+
+tests:
+  - requirements:
+      run:
+        - posix-env
+    script:
+      interpreter: cmd
+      content:
+        - gzip --version
+        - sh -c "printf 'hello\n' > t && gzip -k t && test -f t.gz" || exit /b 1
+        # gunzip and zcat are gzip itself, under those names.
+        - sh -c "zcat t.gz | cmp - t" || exit /b 1
+        - sh -c "rm t && gunzip t.gz && printf 'hello\n' | cmp - t" || exit /b 1
+        - sh -c "gzip < t | gzip -dc | cmp - t" || exit /b 1
+        - sh -c "gzip -k t && zgrep -q hello t.gz" || exit /b 1
+        - sh -c "printf 'hellx\n' | gzip > u.gz && ! zcmp -s t.gz u.gz" || exit /b 1
+
+about:
+  homepage: https://www.gnu.org/software/gzip/
+  license: GPL-3.0-or-later
+  license_file: COPYING
+  summary: GNU gzip compression program

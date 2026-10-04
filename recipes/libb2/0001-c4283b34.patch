@@ -1,0 +1,28 @@
+From c4283b3469f94d6e209b5f22a4cea6ba1f27d8a8 Mon Sep 17 00:00:00 2001
+From: Jeffrey Walton <noloader@gmail.com>
+Date: Tue, 30 Jun 2020 13:54:56 -0400
+Subject: [PATCH] Fix missing xgetbv on downlevel compilers
+
+---
+ src/blake2-dispatch.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/src/blake2-dispatch.c b/src/blake2-dispatch.c
+index 96bb340..ad5cea6 100644
+--- a/src/blake2-dispatch.c
++++ b/src/blake2-dispatch.c
+@@ -64,11 +64,13 @@ static inline void cpuid( uint32_t *eax, uint32_t *ebx, uint32_t *ecx, uint32_t
+ #endif
+ }
+ 
++/* xgetbv insn is GCC 4.5 and above. The byte codes sidestep the limitation */
++/* Also see http://www.agner.org/optimize/vectorclass/read.php?i=65 */
+ static inline uint64_t xgetbv(uint32_t xcr)
+ {
+   uint32_t a, d;
+   __asm__ __volatile__(
+-    "xgetbv"
++    ".byte 0x0f, 0x01, 0xd0"
+     :  "=a"(a),"=d"(d)
+     : "c"(xcr)
+   );

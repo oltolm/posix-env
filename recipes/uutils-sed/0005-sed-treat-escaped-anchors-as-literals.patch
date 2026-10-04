@@ -1,0 +1,82 @@
+From 48871294b2b441488a7e750fa7ae212c5f4b1084 Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Thu, 1 Oct 2026 23:52:30 +0200
+Subject: [PATCH 5/5] sed: treat escaped anchors as literals
+
+The literal fast path removed the escapes from \^ and \$ and then
+interpreted the resulting characters as beginning and end anchors. Route
+these patterns through the byte regex engine so the escaped characters
+retain their BRE literal meaning.
+---
+ src/sed/fast_regex.rs     | 19 +++++++++++++++++++
+ tests/by-util/test_sed.rs | 10 ++++++++++
+ 2 files changed, 29 insertions(+)
+
+diff --git a/src/sed/fast_regex.rs b/src/sed/fast_regex.rs
+index 9fa87be..a5b2e17 100644
+--- a/src/sed/fast_regex.rs
++++ b/src/sed/fast_regex.rs
+@@ -71,6 +71,7 @@ pub(crate) static NEEDS_RE: LazyLock<ByteRegex> = LazyLock::new(|| {
+              | \\[WwDdSsPp]      # Unicode classes
+              | \\[AzBb]          # Empty matches
+              | \\[0-9]           # Back-references
++             | \\[\^$]           # Escaped anchors are literals
+            )
+         ",
+     )
+@@ -559,6 +560,8 @@ mod tests {
+             r"foo|bar", // Regex alternation
+             r"abc?",    // Regex optional
+             r"a*b",     // Regex star
++            r"\^abc",   // Escaped beginning anchor
++            r"abc\$",   // Escaped end anchor
+             r"[abc]",   // Character class
+             r"(abc)",   // Group
+             r"{1,2}",   // Repetition
+@@ -635,6 +638,22 @@ mod tests {
+         assert!(matches!(re, Regex::Literal(_)));
+     }
+ 
++    #[test]
++    fn escaped_anchors_are_literals() {
++        for (pattern, matching, nonmatching) in
++            [(r"\^abc", "^abc", "abc"), (r"abc\$", "abc$", "abc")]
++        {
++            let re = Regex::new(pattern, CharacterMode::Utf8).unwrap();
++            assert!(matches!(re, Regex::Byte(_)));
++
++            let mut matching = IOChunk::new_from_str(matching);
++            assert!(re.is_match(&mut matching).unwrap());
++
++            let mut nonmatching = IOChunk::new_from_str(nonmatching);
++            assert!(!re.is_match(&mut nonmatching).unwrap());
++        }
++    }
++
+     #[test]
+     fn handles_invalid_regex_gracefully() {
+         let err = Regex::new("(", CharacterMode::Utf8)
+diff --git a/tests/by-util/test_sed.rs b/tests/by-util/test_sed.rs
+index e6f2a17..59a7215 100644
+--- a/tests/by-util/test_sed.rs
++++ b/tests/by-util/test_sed.rs
+@@ -503,6 +503,16 @@ fn bre_closing_brace_delimiter() {
+ // Substitution: s
+ check_output!(subst_any, ["-e", r"s/./X/g", LINES1]);
+ check_output!(subst_any_global, ["-e", r"s,.,X,g", LINES1]);
++
++#[test]
++fn subst_escaped_anchors_are_literals() {
++    new_ucmd!()
++        .args(&["-e", r"s/\$/dollar/g", "-e", r"s/\^/caret/g"])
++        .pipe_in("plain\n$^\n")
++        .succeeds()
++        .stdout_is("plain\ndollarcaret\n");
++}
++
+ check_output!(subst_escaped_magic_separator, ["-e", r"s.\..X.g", LINES1]);
+ check_output!(subst_escaped_braced_separator, ["-e", r"s/[\/]/Q/", LINES1]);
+ check_output!(subst_escaped_separator, ["-e", r"s_\__X_", LINES1]);
+-- 
+2.56.0.windows.1
+

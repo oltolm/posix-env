@@ -1,0 +1,50 @@
+context:
+  version: "2.5.25"
+
+package:
+  name: winflexbison
+  version: ${{ version }}
+
+source:
+  url: https://github.com/lexxmark/winflexbison/archive/refs/tags/v${{ version }}.tar.gz
+  sha256: 8e1b71e037b524ba3f576babb0cf59182061df1f19cd86112f085a882560f60b
+  patches:
+    # 2.5.25 builds only with MSVC; the next upstream commit fixes CMake.
+    - 000-backport-a243a1c-non-msvc-cmake.patch
+    # C90 is too old for mingw-w64's headers, and two MSVC substitutes clash
+    # with what mingw-w64 provides.
+    - 001-build-with-mingw-w64.patch
+
+build:
+  number: 4
+  script:
+    interpreter: brush
+    file: build.sh
+
+requirements:
+  build:
+    - posix-env
+  host:
+    - scriptexe
+
+tests:
+  - requirements:
+      # yacc is a "#! /bin/sh" script; scriptexe finds sh.exe in PATH.
+      run:
+        - posix-env
+    script:
+      interpreter: cmd
+      content:
+        - flex --version
+        - bison --version
+        - yacc --version
+        - lex --version
+
+about:
+  homepage: https://github.com/lexxmark/winflexbison
+  # flex is BSD, bison and its built-in m4 are GPL-3.0-or-later.
+  license: GPL-3.0-or-later AND BSD-3-Clause
+  license_file:
+    - flex/src/COPYING
+    - bison/src/COPYING
+  summary: flex and bison ported to Windows

@@ -1,0 +1,22 @@
+gettext's printf functions accept MS-specific format specifiers such as
+%I64u, which __gnu_printf__ format checking rejects; do not declare the
+attribute on MinGW.  From MSYS2's mingw-w64-gettext.
+
+diff --git a/gettext-runtime/intl/libgnuintl.in.h b/gettext-runtime/intl/libgnuintl.in.h
+index c326df2..2713c3f 100644
+--- a/gettext-runtime/intl/libgnuintl.in.h
++++ b/gettext-runtime/intl/libgnuintl.in.h
+@@ -167,6 +167,13 @@ extern int libintl_version;
+ # define _INTL_ATTRIBUTE_FORMAT(spec)
+ #endif
+ 
++/* gettext printf functions allow ms specific format specifiers like %I64u
++   which error out with __gnu_printf__, so revert this for now on Windows */
++#ifdef __MINGW32__
++#undef _INTL_ATTRIBUTE_FORMAT
++#define _INTL_ATTRIBUTE_FORMAT(spec)
++#endif
++
+ /* _INTL_ATTRIBUTE_SPEC_PRINTF_STANDARD
+    An __attribute__ __format__ specifier for a function that takes a format
+    string and arguments, where the format string directives are the ones

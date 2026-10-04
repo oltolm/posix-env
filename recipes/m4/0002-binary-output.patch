@@ -1,0 +1,34 @@
+Write stdout, stderr and --debugfile in binary mode: on native Windows
+stdio would end their lines with CRLF.  Programs parse both streams;
+libtool's extract-trace reads the traces on stderr and could not strip
+"])" before the CR, so libtoolize took AC_CONFIG_AUX_DIR([build/autoconf])
+for 'build/autoconf])'.
+
+diff --git a/src/debug.c b/src/debug.c
+--- a/src/debug.c
++++ b/src/debug.c
+@@ -209,7 +209,7 @@
+     debug_set_file (NULL);
+   else
+     {
+-      fp = fopen (name, "ae");
++      fp = fopen (name, O_BINARY ? "abe" : "ae");
+       if (fp == NULL)
+         return false;
+       debug_set_file (fp);
+diff --git a/src/m4.c b/src/m4.c
+--- a/src/m4.c
++++ b/src/m4.c
+@@ -465,6 +465,12 @@
+   textdomain (PACKAGE);
+   atexit (close_stdin);
+ 
++  /* Output is text with LF line ends, also where stdio would write CRLF
++     (native Windows).  Programs parse both streams: libtool's
++     extract-trace reads the traces on stderr.  */
++  set_binary_mode (STDOUT_FILENO, O_BINARY);
++  set_binary_mode (STDERR_FILENO, O_BINARY);
++
+   include_init ();
+   debug_init ();
+ 

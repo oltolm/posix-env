@@ -1,0 +1,56 @@
+extract-trace, inline-source: work with programs and scripts on Windows
+
+func_find_tool and func_require_AWK test $dir/m4 and $dir/gawk, which
+never exist on Windows (the programs are m4.exe and gawk.exe), so the build
+and libtoolize failed with "Please install GNU M4" and "Please install
+GNU Awk".  inline-source also runs itself again through env, which
+cannot start a #! script on Windows; run it with sh.
+
+diff --git a/build-aux/extract-trace b/build-aux/extract-trace
+index 4655ff1..9983275 100644
+--- a/build-aux/extract-trace
++++ b/build-aux/extract-trace
+@@ -166,6 +166,9 @@ func_find_tool ()
+ 	for _G_dir in $PATH; do
+ 	  IFS=$_G_find_tool_save_IFS
+ 	  _G_progpath=$_G_dir/$_G_prog
++	  # Windows: the program is PROG.exe.
++	  test -r "$_G_progpath" || test ! -r "$_G_progpath.exe" \
++	    || _G_progpath=$_G_progpath.exe
+           test -r "$_G_progpath" && {
+             _G_curver=`func_tool_version_number $_G_progpath`
+ 	    case $_G_bestver,$_G_curver in
+diff --git a/build-aux/inline-source b/build-aux/inline-source
+index 8bd9e66..be970a1 100644
+--- a/build-aux/inline-source
++++ b/build-aux/inline-source
+@@ -87,6 +87,12 @@ func_require_AWK ()
+ 	    AWK=$_G_dir/$_G_prog
+             break 2
+           fi
++	  # Windows: the program is PROG.exe.
++          if test -f "$_G_dir/$_G_prog.exe" && test -x "$_G_dir/$_G_prog.exe"
++	  then
++	    AWK=$_G_dir/$_G_prog.exe
++            break 2
++          fi
+         done
+ 	IFS=$require_AWK_IFS
+       done
+@@ -131,14 +137,14 @@ func_include ()
+ 
+         /^\. ['\''"].*['\''"]$/ {
+             file = substr ($2, 2, length ($2) -2);
+-	    system (sprintf ("env _RECURSE_MAGIC=%d '$progpath' %s", magic, file));
++	    system (sprintf ("env _RECURSE_MAGIC=%d sh '$progpath' %s", magic, file));
+             next;
+         }
+ 
+         /^\. `echo [^`]*`['\''"][^'\''"]*['\''"]$/ {
+             tail = substr ($0, match ($0, /`['\''"]/));
+ 	    file = substr (tail, 3, length (tail) -3);
+-	    system (sprintf ("env _RECURSE_MAGIC=%d '$progpath' '"$_G_scriptdir"'%s", magic, file));
++	    system (sprintf ("env _RECURSE_MAGIC=%d sh '$progpath' '"$_G_scriptdir"'%s", magic, file));
+             next;
+         }
+ 

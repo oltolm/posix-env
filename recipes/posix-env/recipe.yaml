@@ -1,0 +1,79 @@
+# The native POSIX environment: brush as sh, the uutils and GNU tools, the
+# activation script and config.site.  The toolchain stays external.
+package:
+  name: posix-env
+  version: 0.1.0
+
+source:
+  - path: which.c
+  - path: chmod.c
+  - path: perlsh.c
+  - path: utf8.manifest
+  - path: utf8-manifest.rc
+  - path: c-locale.c
+  - path: binmode.c
+
+build:
+  number: 12
+  script:
+    interpreter: brush
+    content:
+      - mkdir -p "$PREFIX/bin" "$PREFIX/lib/posix-env" "$PREFIX/share/posix-env" "$PREFIX/etc/conda/activate.d" "$PREFIX/etc/conda/deactivate.d"
+      # config.site links these into every program.
+      - windres -i utf8-manifest.rc -o "$PREFIX/lib/posix-env/utf8-manifest.o"
+      - gcc -O2 -c c-locale.c -o "$PREFIX/lib/posix-env/c-locale.o"
+      - gcc -O2 -c binmode.c -o "$PREFIX/lib/posix-env/binmode.o"
+      - gcc -O2 -o "$PREFIX/bin/which.exe" which.c "$PREFIX/lib/posix-env/utf8-manifest.o" "$PREFIX/lib/posix-env/binmode.o"
+      - gcc -O2 -o "$PREFIX/bin/chmod.exe" chmod.c "$PREFIX/lib/posix-env/utf8-manifest.o" "$PREFIX/lib/posix-env/binmode.o"
+      # Wide strings throughout; no manifest needed.
+      - gcc -O2 -municode -o "$PREFIX/bin/perlsh.exe" perlsh.c
+      - cp "$RECIPE_DIR/config.site" "$PREFIX/share/posix-env/"
+      - cp "$RECIPE_DIR/activate.bat" "$PREFIX/etc/conda/activate.d/posix-env.bat"
+      - cp "$RECIPE_DIR/deactivate.bat" "$PREFIX/etc/conda/deactivate.d/posix-env.bat"
+
+requirements:
+  build:
+    - posix-env
+  run:
+    - brush
+    - uutils-coreutils
+    - uutils-findutils
+    - uutils-grep
+    - uutils-sed
+    - gawk
+    - make
+    - m4
+    - scriptexe
+    - winflexbison
+
+tests:
+  - requirements:
+      run:
+        - autoconf
+    script:
+      interpreter: cmd
+      content:
+        - which sh
+        - sh -c "echo a b | awk '{ print $2 }' | grep -q b" || exit /b 1
+        - sh -c "printf 'x\n' | sed s/x/y/ | tr y z | grep -qx z" || exit /b 1
+        - sh -c "test -n \"$CONFIG_SITE\" && test -f \"$CONFIG_SITE\"" || exit /b 1
+        # Programs that configure links get the UTF-8 manifest.
+        - echo AC_INIT([t],[1])> configure.ac
+        - echo AC_PROG_CC>> configure.ac
+        - echo AC_RUN_IFELSE([AC_LANG_PROGRAM([[#include ^<windows.h^>]], [[return GetACP () != 65001;]])], [], [AC_MSG_ERROR([no UTF-8 manifest])])>> configure.ac
+        # ... and setlocale's C locales: "" is C, C.UTF-8 has UTF-8 characters.
+        - echo AC_RUN_IFELSE([AC_LANG_PROGRAM([[#include ^<locale.h^>>> configure.ac
+        - 'echo #include ^<stdlib.h^>>> configure.ac'
+        - 'echo #include ^<string.h^>]],>> configure.ac'
+        - echo [[return strcmp (setlocale (LC_ALL, ""), "C") ^|^| !setlocale (LC_ALL, "C.UTF-8") ^|^| MB_CUR_MAX ^< 4;]])], [], [AC_MSG_ERROR([setlocale not C])])>> configure.ac
+        # ... and binary standard streams.
+        - echo AC_RUN_IFELSE([AC_LANG_PROGRAM([[#include ^<io.h^>>> configure.ac
+        - 'echo #include ^<fcntl.h^>]],>> configure.ac'
+        - echo [[return _setmode (1, _O_BINARY) != _O_BINARY;]])], [], [AC_MSG_ERROR([stdout not binary])])>> configure.ac
+        - echo AC_OUTPUT>> configure.ac
+        - autoconf || exit /b 1
+        - sh ./configure || exit /b 1
+
+about:
+  license: MIT
+  summary: Native POSIX build environment without the MSYS runtime

@@ -1,0 +1,62 @@
+context:
+  version: "1.5.7"
+
+package:
+  name: zstd
+  version: ${{ version }}
+
+source:
+  url: https://github.com/facebook/zstd/releases/download/v${{ version }}/zstd-${{ version }}.tar.gz
+  sha256: eb33e51f49a15e023950cd7825ca74a4a2b43db8354825ac24fc1b7ee09e6fa3
+  patches:
+    - 0001-fileio-mingw.patch
+
+build:
+  number: 3
+  script:
+    interpreter: brush
+    file: build.sh
+
+requirements:
+  run_exports:
+    - ${{ pin_subpackage('zstd', upper_bound='x') }}
+  build:
+    - posix-env
+  host:
+    # The zstd program also reads and writes .gz, .xz, .lzma and .lz4.
+    - zlib
+    - xz
+    - lz4
+    - scriptexe
+
+tests:
+  - requirements:
+      run:
+        - posix-env
+    script:
+      interpreter: cmd
+      content:
+        - zstd --version
+        - zstd -H | findstr /c:"--format=gzip" || exit /b 1
+        - echo hello> t
+        - zstd t -o t.zst || exit /b 1
+        - zstdcat t.zst | findstr /b hello || exit /b 1
+        - zstd --format=xz t -o t.xz || exit /b 1
+        - unzstd -c t.xz | findstr /b hello || exit /b 1
+        - zstdgrep -c hello t.zst | findstr /b 1 || exit /b 1
+  - package_contents:
+      files:
+        - bin/libzstd.dll
+        - lib/libzstd.dll.a
+        - lib/pkgconfig/libzstd.pc
+        - include/zstd.h
+        - include/zdict.h
+        - include/zstd_errors.h
+
+about:
+  homepage: https://facebook.github.io/zstd/
+  license: BSD-3-Clause OR GPL-2.0-only
+  license_file:
+    - LICENSE
+    - COPYING
+  summary: Zstandard compression library and program

@@ -1,0 +1,103 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Sat, 3 Oct 2026 15:02:34 +0200
+Subject: [PATCH 5/6] tar: Handle unconvertible pathnames in edit_pathname
+
+archive_entry_pathname returns NULL when a wide pathname cannot be converted to the current locale.  edit_pathname passed that NULL pointer to strip_absolute_path, causing bsdtar to crash.\n\nReport the conversion failure, mark the operation unsuccessful, and skip the entry.  Add a Windows regression test using a pathname outside the active code page.
+---
+ tar/test/CMakeLists.txt                     |  1 +
+ tar/test/test_windows_filename_conversion.c | 46 +++++++++++++++++++++
+ tar/util.c                                  | 15 +++++--
+ 3 files changed, 59 insertions(+), 3 deletions(-)
+ create mode 100644 tar/test/test_windows_filename_conversion.c
+
+diff --git a/tar/test/CMakeLists.txt b/tar/test/CMakeLists.txt
+index 5edb070..44aa85a 100644
+--- a/tar/test/CMakeLists.txt
++++ b/tar/test/CMakeLists.txt
+@@ -84,6 +84,7 @@ IF(ENABLE_TAR AND ENABLE_TEST)
+     test_symlink_dir.c
+     test_version.c
+     test_windows.c
++    test_windows_filename_conversion.c
+   )
+ 
+   #
+diff --git a/tar/test/test_windows_filename_conversion.c b/tar/test/test_windows_filename_conversion.c
+new file mode 100644
+index 0000000..b5e929b
+--- /dev/null
++++ b/tar/test/test_windows_filename_conversion.c
+@@ -0,0 +1,46 @@
++/*-
++ * SPDX-License-Identifier: BSD-2-Clause
++ *
++ * Copyright (c) 2026 Oleg Tolstoy
++ * All rights reserved.
++ */
++#include "test.h"
++
++#if defined(_WIN32) && !defined(__CYGWIN__)
++#include <windows.h>
++#endif
++
++DEFINE_TEST(test_windows_filename_conversion)
++{
++#if defined(_WIN32) && !defined(__CYGWIN__)
++	static const wchar_t filename[] = L"\xd83d\xde00.txt";
++	BOOL used_default = FALSE;
++	HANDLE h;
++	char *p;
++	size_t s;
++
++	/* The pathname must not be representable in the current code page. */
++	if (WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, filename, -1,
++	    NULL, 0, NULL, &used_default) == 0 || !used_default) {
++		skipping("The test pathname is representable in the current code page");
++		return;
++	}
++
++	h = CreateFileW(filename, GENERIC_WRITE, 0, NULL, CREATE_NEW,
++	    FILE_ATTRIBUTE_NORMAL, NULL);
++	assert(h != INVALID_HANDLE_VALUE);
++	assert(CloseHandle(h));
++
++	/* A pathname conversion failure must be reported without crashing. */
++	assertEqualInt(1,
++	    systemf("%s -cf archive.tar . >test.out 2>test.err", testprog));
++	p = slurpfile(&s, "test.err");
++	if (assert(p != NULL)) {
++		assert(strstr(p,
++		    "Can't translate pathname to current locale") != NULL);
++		free(p);
++	}
++#else
++	skipping("Windows specific test");
++#endif
++}
+diff --git a/tar/util.c b/tar/util.c
+index 730a9ad..e1f196d 100644
+--- a/tar/util.c
++++ b/tar/util.c
+@@ -476,9 +476,18 @@ int
+ edit_pathname(struct bsdtar *bsdtar, struct archive_entry *entry)
+ {
+ 	const char *name = archive_entry_pathname(entry);
+-	const char *original_name = name;
+-	const char *hardlinkname = archive_entry_hardlink(entry);
+-	const char *original_hardlinkname = hardlinkname;
++	const char *original_name;
++	const char *hardlinkname;
++	const char *original_hardlinkname;
++
++	if (name == NULL) {
++		lafe_warnc(0, "Can't translate pathname to current locale");
++		bsdtar->return_value = 1;
++		return (1);
++	}
++	original_name = name;
++	hardlinkname = archive_entry_hardlink(entry);
++	original_hardlinkname = hardlinkname;
+ #if defined(HAVE_REGEX_H) || defined(HAVE_PCREPOSIX_H) || defined(HAVE_PCRE2POSIX_H)
+ 	char *subst_name;
+ 	int r;

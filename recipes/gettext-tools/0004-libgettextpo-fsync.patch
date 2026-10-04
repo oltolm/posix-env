@@ -1,0 +1,18 @@
+libgettextpo: Windows has _commit, not fsync.
+From MSYS2's mingw-w64-gettext (0021-replace-fsync.patch).
+
+diff --git a/gettext-tools/libgettextpo/textstyle.in.h b/gettext-tools/libgettextpo/textstyle.in.h
+index 00df44f..2a4a54e 100644
+--- a/gettext-tools/libgettextpo/textstyle.in.h
++++ b/gettext-tools/libgettextpo/textstyle.in.h
+@@ -69,6 +69,10 @@
+ # endif
+ #endif
+ 
++#ifdef _WIN32
++# define fsync _commit
++#endif
++
+ /* ----------------------------- From ostream.h ----------------------------- */
+ 
+ /* Describes the scope of a flush operation.  */

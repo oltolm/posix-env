@@ -1,0 +1,115 @@
+From f12031f5971bd578f6c868c8adc5f15d3743c3fa Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Fri, 2 Oct 2026 00:04:35 +0200
+Subject: [PATCH 13/21] fix(windows): quote wildcard arguments passed to native
+ programs
+
+Native programs often expand wildcards in their own command line: Rust
+programs using the `wild` crate (all of uutils) and mingw-w64 programs
+built with `_dowildcard`.  The shell has already expanded patterns, so an
+argument that is still literal gets expanded a second time.  Autoconf's
+`expr "x$ac_feature" : ".*[^-+._$as_cr_alnum]"` thus matched `.deps` in
+the build directory and failed with "unexpected argument '.deps'".
+
+Both leave double-quoted arguments alone, but `std` quotes only arguments
+with whitespace or quotes.  Quote arguments containing `*`, `?` or `[`
+ourselves and pass them with `raw_arg`.
+
+Assisted-by: Claude Code:claude-opus-5-5
+---
+ brush-core/src/commands.rs | 71 ++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 71 insertions(+)
+
+diff --git a/brush-core/src/commands.rs b/brush-core/src/commands.rs
+index 6533d2b7..6eb12984 100644
+--- a/brush-core/src/commands.rs
++++ b/brush-core/src/commands.rs
+@@ -204,6 +204,11 @@ pub fn compose_std_command<S: AsRef<OsStr>, SE: extensions::ShellExtensions>(
+     cmd.arg0(argv0);
+ 
+     // Pass through args.
++    #[cfg(windows)]
++    for arg in args {
++        push_windows_arg(&mut cmd, arg.as_ref());
++    }
++    #[cfg(not(windows))]
+     cmd.args(args);
+ 
+     // Use the shell's current working dir.
+@@ -905,10 +910,76 @@ fn crlf_to_lf(output: String) -> String {
+     }
+ }
+ 
++/// Adds `arg` to the command line, double-quoted if it contains a wildcard.
++///
++/// The shell has already expanded patterns, but many native programs expand
++/// them again: mingw-w64 programs built with `_dowildcard`, and Rust programs
++/// using the `wild` crate, such as uutils.  Both leave quoted arguments alone,
++/// while `std` quotes only arguments containing whitespace or quotes.
++#[cfg(windows)]
++fn push_windows_arg(cmd: &mut std::process::Command, arg: &OsStr) {
++    use std::os::windows::process::CommandExt;
++
++    match arg.to_str() {
++        Some(s) if s.contains(['*', '?', '[']) => {
++            cmd.raw_arg(quote_windows_arg(s));
++        }
++        _ => {
++            cmd.arg(arg);
++        }
++    }
++}
++
++/// Quotes `arg` so that `CommandLineToArgvW` and the C runtimes parse it back
++/// unchanged.
++#[cfg(windows)]
++fn quote_windows_arg(arg: &str) -> String {
++    let mut quoted = String::with_capacity(arg.len() + 2);
++    quoted.push('"');
++    let mut backslashes = 0;
++    for c in arg.chars() {
++        match c {
++            '\\' => backslashes += 1,
++            '"' => {
++                // Backslashes before a quote are escapes, and so is one for
++                // the quote itself.
++                quoted.extend(std::iter::repeat_n('\\', 2 * backslashes + 1));
++                backslashes = 0;
++            }
++            _ => {
++                quoted.extend(std::iter::repeat_n('\\', backslashes));
++                backslashes = 0;
++            }
++        }
++        if c != '\\' {
++            quoted.push(c);
++        }
++    }
++    // Backslashes before the closing quote must not escape it.
++    quoted.extend(std::iter::repeat_n('\\', 2 * backslashes));
++    quoted.push('"');
++    quoted
++}
++
+ #[cfg(test)]
+ #[cfg(windows)]
+ mod tests {
+     use super::crlf_to_lf;
++    use super::quote_windows_arg;
++
++    #[test]
++    fn wildcard_arg_is_quoted() {
++        assert_eq!(quote_windows_arg(".*[^-+._a-z]"), "\".*[^-+._a-z]\"");
++        assert_eq!(quote_windows_arg("*.o"), "\"*.o\"");
++    }
++
++    #[test]
++    fn quoted_arg_keeps_backslashes_and_quotes() {
++        assert_eq!(quote_windows_arg(r"a\b*"), r#""a\b*""#);
++        assert_eq!(quote_windows_arg(r"x*\"), r#""x*\\""#);
++        assert_eq!(quote_windows_arg(r#"a"*"#), r#""a\"*""#);
++        assert_eq!(quote_windows_arg(r#"a\"*"#), r#""a\\\"*""#);
++    }
+ 
+     #[test]
+     fn command_substitution_drops_cr_before_lf() {

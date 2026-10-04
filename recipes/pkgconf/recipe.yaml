@@ -1,0 +1,38 @@
+context:
+  version: "3.0.7"
+
+package:
+  name: pkgconf
+  version: ${{ version }}
+
+source:
+  url: https://distfiles.ariadne.space/pkgconf/pkgconf-${{ version }}.tar.xz
+  sha256: c926ff491cbd9a331a589160811bd97ab1749b4d5198a519338f2cdfabe6940a
+
+build:
+  number: 5
+  script:
+    interpreter: brush
+    content:
+      - ./configure --prefix="$PREFIX" --disable-static
+      - make -j"$(nproc)"
+      - make install
+      - cp "$PREFIX/bin/pkgconf.exe" "$PREFIX/bin/pkg-config.exe"
+
+requirements:
+  build:
+    - posix-env
+
+tests:
+  - script:
+      interpreter: cmd
+      content:
+        - pkgconf --version
+        - pkg-config --version
+        - pkg-config --exists libpkgconf || exit /b 1
+
+about:
+  homepage: http://pkgconf.org/
+  license: ISC
+  license_file: COPYING
+  summary: Package compiler and linker metadata toolkit

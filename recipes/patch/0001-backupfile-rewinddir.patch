@@ -1,0 +1,29 @@
+backupfile: rewind gnulib's DIR replacement.  On native Windows gnulib
+wraps the system's DIR (for fdopendir), but the backupfile module does
+not depend on gnulib's rewinddir, so the system's was called on the
+wrapper: "passing argument 1 of 'rewinddir' from incompatible pointer
+type".  Rewind the wrapped DIR, as gnulib's rewinddir.c does.  Still so
+in gnulib master.
+
+--- a/lib/backupfile.c
++++ b/lib/backupfile.c
+@@ -37,6 +37,19 @@
+ #include "opendirat.h"
+ #include "renameatu.h"
+ 
++#if GNULIB_defined_DIR && HAVE_DIRENT_H
++/* gnulib's DIR wraps the system's here (for fdopendir; native Windows),
++   but this module does not depend on gnulib's rewinddir: rewind the
++   wrapped DIR, as rewinddir.c does.  */
++# include "dirent-private.h"
++static void
++backupfile_rewinddir (DIR *dirp)
++{
++  rewinddir (dirp->real_dirp);
++}
++# define rewinddir backupfile_rewinddir
++#endif
++
+ #ifndef _D_EXACT_NAMLEN
+ # define _D_EXACT_NAMLEN(dp) strlen ((dp)->d_name)
+ #endif

@@ -1,0 +1,76 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Sat, 3 Oct 2026 15:04:43 +0200
+Subject: [PATCH 6/6] tar: Use UTF-8 as Windows active code page
+
+bsdtar uses narrow strings for command-line arguments and pathname processing even though libarchive accesses the Windows filesystem through wide APIs.  The default active code page cannot represent every pathname.\n\nRequest UTF-8 through the application manifest so narrow strings can represent the full Unicode pathname.
+---
+ tar/bsdtar.exe.manifest                     |  4 ++-
+ tar/test/test_windows_filename_conversion.c | 31 ++++++++-------------
+ 2 files changed, 14 insertions(+), 21 deletions(-)
+
+diff --git a/tar/bsdtar.exe.manifest b/tar/bsdtar.exe.manifest
+index 32142e9..50f6434 100644
+--- a/tar/bsdtar.exe.manifest
++++ b/tar/bsdtar.exe.manifest
+@@ -8,8 +8,10 @@
+     </security>
+   </trustInfo>
+   <application xmlns="urn:schemas-microsoft-com:asm.v3">
+-    <windowsSettings xmlns:ws2="http://schemas.microsoft.com/SMI/2016/WindowsSettings">
++    <windowsSettings xmlns:ws2="http://schemas.microsoft.com/SMI/2016/WindowsSettings"
++        xmlns:ws3="http://schemas.microsoft.com/SMI/2019/WindowsSettings">
+       <ws2:longPathAware>true</ws2:longPathAware>
++      <ws3:activeCodePage>UTF-8</ws3:activeCodePage>
+     </windowsSettings>
+   </application>
+ </assembly>
+diff --git a/tar/test/test_windows_filename_conversion.c b/tar/test/test_windows_filename_conversion.c
+index b5e929b..e74c348 100644
+--- a/tar/test/test_windows_filename_conversion.c
++++ b/tar/test/test_windows_filename_conversion.c
+@@ -13,33 +13,24 @@
+ DEFINE_TEST(test_windows_filename_conversion)
+ {
+ #if defined(_WIN32) && !defined(__CYGWIN__)
+-	static const wchar_t filename[] = L"\xd83d\xde00.txt";
+-	BOOL used_default = FALSE;
++	static const wchar_t filename[] = L"src\\\xd83d\xde00.txt";
++	static const wchar_t extracted[] = L"out\\\xd83d\xde00.txt";
++	DWORD attributes;
+ 	HANDLE h;
+-	char *p;
+-	size_t s;
+-
+-	/* The pathname must not be representable in the current code page. */
+-	if (WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, filename, -1,
+-	    NULL, 0, NULL, &used_default) == 0 || !used_default) {
+-		skipping("The test pathname is representable in the current code page");
+-		return;
+-	}
+ 
++	assertMakeDir("src", 0755);
+ 	h = CreateFileW(filename, GENERIC_WRITE, 0, NULL, CREATE_NEW,
+ 	    FILE_ATTRIBUTE_NORMAL, NULL);
+ 	assert(h != INVALID_HANDLE_VALUE);
+ 	assert(CloseHandle(h));
+ 
+-	/* A pathname conversion failure must be reported without crashing. */
+-	assertEqualInt(1,
+-	    systemf("%s -cf archive.tar . >test.out 2>test.err", testprog));
+-	p = slurpfile(&s, "test.err");
+-	if (assert(p != NULL)) {
+-		assert(strstr(p,
+-		    "Can't translate pathname to current locale") != NULL);
+-		free(p);
+-	}
++	/* The UTF-8 active code page must preserve the pathname round trip. */
++	assertEqualInt(0, systemf("%s -cf archive.tar -C src .", testprog));
++	assertMakeDir("out", 0755);
++	assertEqualInt(0, systemf("%s -xf archive.tar -C out", testprog));
++	attributes = GetFileAttributesW(extracted);
++	assert(attributes != INVALID_FILE_ATTRIBUTES);
++	assert((attributes & FILE_ATTRIBUTE_DIRECTORY) == 0);
+ #else
+ 	skipping("Windows specific test");
+ #endif

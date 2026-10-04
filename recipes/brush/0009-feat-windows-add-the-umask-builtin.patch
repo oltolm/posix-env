@@ -1,0 +1,122 @@
+From c9684f4b0487bd90307393af5340dc3bb640c75d Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Thu, 1 Oct 2026 17:00:54 +0200
+Subject: [PATCH 09/21] feat(windows): add the umask builtin
+
+config.status creates its temporary directory with
+`(umask 077 && mkdir "$tmp")`, which failed because umask was
+Unix-only.
+
+Windows files have no POSIX mode bits for a umask to clear, so
+remember and report the value without applying it.
+
+Assisted-by: Claude Code:claude-opus-5-5
+---
+ brush-builtins/src/factory.rs |  2 +-
+ brush-builtins/src/lib.rs     |  2 +-
+ brush-builtins/src/umask.rs   | 39 +++++++++++++++++++++++++++++++++--
+ 3 files changed, 39 insertions(+), 4 deletions(-)
+
+diff --git a/brush-builtins/src/factory.rs b/brush-builtins/src/factory.rs
+index e775b34d..f689b198 100644
+--- a/brush-builtins/src/factory.rs
++++ b/brush-builtins/src/factory.rs
+@@ -133,7 +133,7 @@ pub fn default_builtins<SE: brush_core::ShellExtensions>(
+     m.insert("type".into(), builtin::<type_::TypeCommand, SE>());
+     #[cfg(all(feature = "builtin.ulimit", unix))]
+     m.insert("ulimit".into(), builtin::<ulimit::ULimitCommand, SE>());
+-    #[cfg(all(feature = "builtin.umask", unix))]
++    #[cfg(all(feature = "builtin.umask", any(unix, windows)))]
+     m.insert("umask".into(), builtin::<umask::UmaskCommand, SE>());
+     #[cfg(feature = "builtin.unalias")]
+     m.insert("unalias".into(), builtin::<unalias::UnaliasCommand, SE>());
+diff --git a/brush-builtins/src/lib.rs b/brush-builtins/src/lib.rs
+index c67620b3..8e2a81e2 100644
+--- a/brush-builtins/src/lib.rs
++++ b/brush-builtins/src/lib.rs
+@@ -107,7 +107,7 @@ mod true_;
+ mod type_;
+ #[cfg(all(feature = "builtin.ulimit", unix))]
+ mod ulimit;
+-#[cfg(all(feature = "builtin.umask", unix))]
++#[cfg(all(feature = "builtin.umask", any(unix, windows)))]
+ mod umask;
+ #[cfg(feature = "builtin.unalias")]
+ mod unalias;
+diff --git a/brush-builtins/src/umask.rs b/brush-builtins/src/umask.rs
+index 08a7c368..e7629cf8 100644
+--- a/brush-builtins/src/umask.rs
++++ b/brush-builtins/src/umask.rs
+@@ -1,7 +1,7 @@
+ use brush_core::{ErrorKind, ExecutionResult, builtins};
+ use cfg_if::cfg_if;
+ use clap::Parser;
+-#[cfg(not(any(target_os = "linux", target_os = "android")))]
++#[cfg(all(unix, not(any(target_os = "linux", target_os = "android"))))]
+ use nix::sys::stat::Mode;
+ use std::io::Write;
+ 
+@@ -63,16 +63,27 @@ cfg_if! {
+             let umask = procfs::process::Process::myself().ok().and_then(|me| me.status().ok()).and_then(|status| status.umask);
+             umask.ok_or_else(|| brush_core::ErrorKind::InvalidUmask.into())
+         }
+-    } else {
++    } else if #[cfg(unix)] {
+         #[expect(clippy::unnecessary_wraps)]
+         fn get_umask() -> Result<u32, brush_core::Error> {
+             let u = nix::sys::stat::umask(Mode::empty());
+             nix::sys::stat::umask(u);
+             Ok(u32::from(u.bits()))
+         }
++    } else {
++        // Windows files have no POSIX mode bits for a umask to clear, but scripts
++        // still set and query it (config.status runs `umask 077` before mkdir),
++        // so only remember the value.
++        static UMASK: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0o022);
++
++        #[expect(clippy::unnecessary_wraps)]
++        fn get_umask() -> Result<u32, brush_core::Error> {
++            Ok(UMASK.load(std::sync::atomic::Ordering::Relaxed))
++        }
+     }
+ }
+ 
++#[cfg(unix)]
+ fn set_umask(value: nix::sys::stat::mode_t) -> Result<(), brush_core::Error> {
+     // value of mode_t can be platform dependent
+     let mode = nix::sys::stat::Mode::from_bits(value).ok_or_else(|| ErrorKind::InvalidUmask)?;
+@@ -80,6 +91,15 @@ fn set_umask(value: nix::sys::stat::mode_t) -> Result<(), brush_core::Error> {
+     Ok(())
+ }
+ 
++#[cfg(not(unix))]
++fn set_umask(value: u32) -> Result<(), brush_core::Error> {
++    if value > 0o777 {
++        return Err(ErrorKind::InvalidUmask.into());
++    }
++    UMASK.store(value, std::sync::atomic::Ordering::Relaxed);
++    Ok(())
++}
++
+ fn symbolic_mask_from_bits(bits: u32) -> String {
+     let mut result = String::new();
+ 
+@@ -95,3 +115,18 @@ fn symbolic_mask_from_bits(bits: u32) -> String {
+ 
+     result
+ }
++
++#[cfg(test)]
++#[cfg(windows)]
++mod tests {
++    use super::{get_umask, set_umask};
++
++    #[test]
++    fn umask_is_remembered() {
++        set_umask(0o077).unwrap();
++        assert_eq!(get_umask().unwrap(), 0o077);
++        set_umask(0o022).unwrap();
++        assert_eq!(get_umask().unwrap(), 0o022);
++        assert!(set_umask(0o1000).is_err());
++    }
++}

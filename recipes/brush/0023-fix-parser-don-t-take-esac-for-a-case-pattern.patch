@@ -1,0 +1,92 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Sun, 4 Oct 2026 23:59:05 +0200
+Subject: [PATCH] fix(parser): don't take esac for a case pattern
+
+In `(case x in x) echo a;; esac)`, the parser took `esac` for the
+pattern of another case item, ended by the subshell's `)`, and then
+missed the `esac`.  As POSIX's grammar has it (rule 4), a first pattern
+`esac` without a preceding `(` is the reserved word.  Automake's
+install hooks have this form (gzip's remove-installed-links).
+---
+ brush-parser/src/parser/peg.rs                    | 15 +++++++++++----
+ .../src/parser/tests/compound_commands.rs         | 15 +++++++++++++++
+ 2 files changed, 26 insertions(+), 4 deletions(-)
+
+diff --git a/brush-parser/src/parser/peg.rs b/brush-parser/src/parser/peg.rs
+index cd84719b..3b7ab842 100644
+--- a/brush-parser/src/parser/peg.rs
++++ b/brush-parser/src/parser/peg.rs
+@@ -325,7 +325,7 @@ peg::parser! {
+             }
+ 
+         pub(crate) rule case_item_ns() -> ast::CaseItem =
+-            s:specific_operator("(")? p:pattern() specific_operator(")") c:compound_list() {
++            s:case_item_start() p:pattern() specific_operator(")") c:compound_list() {
+                 let start = s.map(Token::location).or_else(|| p.first().and_then(|w| w.loc.as_ref()));
+                 let end = c.location();
+ 
+@@ -333,7 +333,7 @@ peg::parser! {
+ 
+                 ast::CaseItem { patterns: p, cmd: Some(c), post_action: ast::CaseItemPostAction::ExitCase, loc }
+             } /
+-            s:specific_operator("(")? p:pattern() e:specific_operator(")") linebreak() {
++            s:case_item_start() p:pattern() e:specific_operator(")") linebreak() {
+                 let start = s.map(Token::location).or_else(|| p.first().and_then(|w| w.loc.as_ref()));
+                 let end = Some(e.location());
+ 
+@@ -342,19 +342,26 @@ peg::parser! {
+             }
+ 
+         pub(crate) rule case_item() -> ast::CaseItem =
+-            s:specific_operator("(")? p:pattern() specific_operator(")") linebreak() post_action:case_item_post_action() linebreak() {
++            s:case_item_start() p:pattern() specific_operator(")") linebreak() post_action:case_item_post_action() linebreak() {
+                 let start = s.map(Token::location).or_else(|| p.first().and_then(|w| w.loc.as_ref()));
+                 let end = Some(post_action.1);
+                 let loc = maybe_location(start, end);
+                 ast::CaseItem { patterns: p, cmd: None, post_action: post_action.0, loc }
+             } /
+-            s:specific_operator("(")? p:pattern() specific_operator(")") c:compound_list() post_action:case_item_post_action() linebreak() {
++            s:case_item_start() p:pattern() specific_operator(")") c:compound_list() post_action:case_item_post_action() linebreak() {
+                 let start = s.map(Token::location).or_else(|| p.first().and_then(|w| w.loc.as_ref()));
+                 let end = Some(post_action.1);
+                 let loc = maybe_location(start, end);
+                 ast::CaseItem { patterns: p, cmd: Some(c), post_action: post_action.0, loc }
+             }
+ 
++        // The "(" that may open a case item.  Without it, a first pattern "esac"
++        // is the reserved word that ends the case (POSIX grammar, rule 4): in
++        // `(case x in x) ;; esac)`, the subshell's ")" must not end a pattern.
++        rule case_item_start() -> Option<&'input Token> =
++            s:specific_operator("(") { Some(s) } /
++            !specific_word("esac") { None }
++
+         rule case_item_post_action() -> (ast::CaseItemPostAction, &'input SourceSpan)  =
+             s:specific_operator(";;") {
+                 (ast::CaseItemPostAction::ExitCase, s.location())
+diff --git a/brush-parser/src/parser/tests/compound_commands.rs b/brush-parser/src/parser/tests/compound_commands.rs
+index 78caee36..cbdf65d2 100644
+--- a/brush-parser/src/parser/tests/compound_commands.rs
++++ b/brush-parser/src/parser/tests/compound_commands.rs
+@@ -235,6 +235,21 @@ fn parse_case_continue() -> Result<()> {
+     Ok(())
+ }
+ 
++#[test]
++fn parse_case_ending_subshell() -> Result<()> {
++    // "esac" and the ")" that closes the subshell on one line: the ")" must
++    // not end a pattern "esac" (it is the reserved word).
++    for input in [
++        "(case x in x) echo a;; esac)",
++        "( case x in (x) echo b;; esac )",
++        "(cd . && case x in x) echo c;; esac) || exit",
++        "case x in (esac) echo e;; esac",
++    ] {
++        test_with_snapshot(input)?;
++    }
++    Ok(())
++}
++
+ // If clause
+ 
+ #[test]

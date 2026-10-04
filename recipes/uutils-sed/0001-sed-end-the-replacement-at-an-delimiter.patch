@@ -1,0 +1,49 @@
+From 8a72eacab9af7d3ab2ef80c95cbbb8918e6e12bb Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Thu, 1 Oct 2026 17:00:24 +0200
+Subject: [PATCH 1/5] sed: end the replacement at an `&` delimiter
+
+`s&a&b&` failed with "unterminated substitute replacement": `&` was
+taken as the whole-match reference before the delimiter was checked.
+Autoconf's config.status uses `&` as the delimiter for @srcdir@ and
+similar substitutions, so it could not generate any Makefile.
+
+Check for the delimiter first, as GNU sed does.
+---
+ src/sed/compiler.rs | 13 ++++++++++++-
+ 1 file changed, 12 insertions(+), 1 deletion(-)
+
+diff --git a/src/sed/compiler.rs b/src/sed/compiler.rs
+index 0e7d5ca..76cf2d5 100644
+--- a/src/sed/compiler.rs
++++ b/src/sed/compiler.rs
+@@ -784,7 +784,9 @@ pub fn compile_replacement(
+                     }
+                 }
+ 
+-                '&' => {
++                // As in GNU sed, a delimiter of `&` ends the replacement
++                // (autoconf's config.status uses `s&@srcdir@&...&`).
++                '&' if delimiter != '&' => {
+                     if !literal.is_empty() {
+                         parts.push(ReplacementPart::Literal(std::mem::take(&mut literal)));
+                     }
+@@ -2439,6 +2441,15 @@ mod tests {
+         );
+     }
+ 
++    #[test]
++    fn test_compile_replacement_ampersand_delimiter() {
++        let (mut lines, mut chars) = make_providers("&C:/src&");
++        let template = compile_replacement_utf8(&mut lines, &mut chars).unwrap();
++
++        assert_eq!(template.parts.len(), 1);
++        assert!(matches!(&template.parts[0], ReplacementPart::Literal(s) if s == b"C:/src"));
++    }
++
+     #[test]
+     fn test_compile_replacement_escape_sequences() {
+         let (mut lines, mut chars) = make_providers("/line\\nnewline\\tend/");
+-- 
+2.56.0.windows.1
+

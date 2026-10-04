@@ -1,0 +1,16 @@
+Accept CP65001, the Windows code page for UTF-8, as an alias of UTF-8.
+From MSYS2's mingw-w64-libiconv.
+
+diff --git a/lib/encodings.def b/lib/encodings.def
+index e77983f..f57508a 100644
+--- a/lib/encodings.def
++++ b/lib/encodings.def
+@@ -63,7 +63,7 @@ DEFALIAS(     "646",                    /* Solaris */
+ 
+ DEFENCODING(( "UTF-8",                  /* IANA, RFC 2279 */
+             /*"UTF8",                      JDK 1.1 */
+-            /*"CP65001",                   Windows */
++              "CP65001",                /* Windows */
+             ),
+             utf8,
+             { utf8_mbtowc, NULL },        { utf8_wctomb, NULL })

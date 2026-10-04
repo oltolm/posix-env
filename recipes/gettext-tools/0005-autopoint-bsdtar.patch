@@ -1,0 +1,17 @@
+autopoint: hand the xz-compressed archive to tar as it is.  The
+environment's tar is bsdtar, which detects and decompresses xz by itself
+(multithreaded); no xz program is needed at run time.
+
+diff --git a/gettext-tools/autotools/autopoint.in b/gettext-tools/autotools/autopoint.in
+--- a/gettext-tools/autotools/autopoint.in
++++ b/gettext-tools/autotools/autopoint.in
+@@ -530,7 +530,8 @@
+     case "@ARCHIVE_FORMAT@" in
+       dirgz) gzip -d -c < "$gettext_datadir/archive.dir.tar.gz" ;;
+       dirbz2) bzip2 -d -c < "$gettext_datadir/archive.dir.tar.bz2" ;;
+-      dirxz) xz -d -c < "$gettext_datadir/archive.dir.tar.xz" ;;
++      # tar is bsdtar, which decompresses by itself (multithreaded).
++      dirxz) cat "$gettext_datadir/archive.dir.tar.xz" ;;
+     esac \
+       | (cd "$work_dir" && tar xf - "gettext-$ver")
+     if test `find "$work_dir" -type f -print | wc -l` = 0; then

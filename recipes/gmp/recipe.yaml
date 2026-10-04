@@ -1,0 +1,58 @@
+context:
+  version: "6.3.0"
+
+package:
+  name: gmp
+  version: ${{ version }}
+
+source:
+  url: https://ftpmirror.gnu.org/gnu/gmp/gmp-${{ version }}.tar.xz
+  sha256: a3c2b80201b89e68616f4ad30bc66aee4927c3ce50e33929ca819d5c43538898
+
+build:
+  number: 6
+  script:
+    interpreter: brush
+    content:
+      # --enable-fat: code for every x86-64 CPU, chosen at run time.
+      # GCC 15+ defaults to C23, where configure's old-style "void g(){}" probes
+      # take no arguments and every compiler is rejected.
+      # libgcc and libstdc++ are linked statically: the toolchain's DLLs are not
+      # part of any environment.
+      # pass_all: libtool's file_magic check drops a static archive from a
+      # DLL's dependencies, such as libstdc++.a below.
+      - >-
+        ./configure CC="gcc -std=gnu17 -static-libgcc" CXX="g++ -static-libgcc -static-libstdc++"
+        --prefix="$PREFIX" --enable-fat --enable-cxx --enable-shared --disable-static
+        lt_cv_deplibs_check_method=pass_all
+      # libtool links C++ libraries with -nostdlib and its own -lstdc++ and
+      # -lpthread, which ignores -static-libstdc++; name the static archives
+      # instead.
+      - >-
+        sed -i -e "/^postdeps=/s|-lstdc++|$(g++ -print-file-name=libstdc++.a)|"
+        -e "/^postdeps=/s|-lpthread|$(g++ -print-file-name=libpthread.a)|" libtool
+      - make -j"$(nproc)"
+      - make install
+
+requirements:
+  run_exports:
+    - ${{ pin_subpackage('gmp', upper_bound='x') }}
+  build:
+    - posix-env
+
+tests:
+  - package_contents:
+      files:
+        - bin/libgmp-10.dll
+        - bin/libgmpxx-4.dll
+        - lib/libgmp.dll.a
+        - include/gmp.h
+
+about:
+  homepage: https://gmplib.org/
+  license: LGPL-3.0-or-later OR GPL-2.0-or-later
+  license_file:
+    - COPYING.LESSERv3
+    - COPYINGv2
+    - COPYINGv3
+  summary: GNU multiple precision arithmetic library

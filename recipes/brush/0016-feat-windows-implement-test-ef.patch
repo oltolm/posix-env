@@ -1,0 +1,94 @@
+From 903691846be7fe6d3ab3c147d309b24bee11ecac Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Fri, 2 Oct 2026 19:17:48 +0200
+Subject: [PATCH 16/21] feat(windows): implement `test -ef`
+
+`test FILE1 -ef FILE2` failed on Windows with "operation not supported
+on this platform: get_device_and_inode".  QEMU's configure uses it to
+detect an in-tree build (`test "$PWD" -ef "$source_path"`) and stopped
+there.
+
+Identify a file by its volume serial number and file index, which is
+what st_dev and st_ino hold on Unix.  winapi-util opens the path with
+backup semantics, so directories work too.
+
+Assisted-by: Claude Code:claude-opus-5-5
+---
+ Cargo.lock                       |  1 +
+ brush-core/Cargo.toml            |  1 +
+ brush-core/src/sys/fs.rs         | 21 +++++++++++++++++++++
+ brush-core/src/sys/windows/fs.rs |  7 +++++--
+ 4 files changed, 28 insertions(+), 2 deletions(-)
+
+diff --git a/Cargo.lock b/Cargo.lock
+index 8629a21a..f70ffb84 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -437,6 +437,7 @@ dependencies = [
+  "uuid",
+  "uzers",
+  "whoami",
++ "winapi-util",
+ ]
+ 
+ [[package]]
+diff --git a/brush-core/Cargo.toml b/brush-core/Cargo.toml
+index 394b5759..59dc2ecd 100644
+--- a/brush-core/Cargo.toml
++++ b/brush-core/Cargo.toml
+@@ -63,6 +63,7 @@ tokio = { version = "1.52.3", features = [
+ [target.'cfg(windows)'.dependencies]
+ check_elevation = "0.2.7"
+ whoami = "2.1.1"
++winapi-util = "0.1.11"
+ 
+ [target.'cfg(unix)'.dependencies]
+ command-fds = "0.3.2"
+diff --git a/brush-core/src/sys/fs.rs b/brush-core/src/sys/fs.rs
+index ded10b07..946b95ad 100644
+--- a/brush-core/src/sys/fs.rs
++++ b/brush-core/src/sys/fs.rs
+@@ -120,4 +120,25 @@ mod tests {
+         // An existing trailing separator is kept as written.
+         assert_eq!(join(r"C:\bin\", "gcc.exe").as_os_str(), r"C:\bin\gcc.exe");
+     }
++
++    /// `test -ef`: QEMU's configure compares `$PWD` with its source directory.
++    #[test]
++    #[allow(clippy::unwrap_used)]
++    fn device_and_inode_identify_files() {
++        let dir = tempfile::tempdir().unwrap();
++        let sub = dir.path().join("sub");
++        std::fs::create_dir(&sub).unwrap();
++        let a = dir.path().join("a");
++        let b = dir.path().join("b");
++        std::fs::write(&a, "a").unwrap();
++        std::fs::write(&b, "b").unwrap();
++        let link = dir.path().join("link");
++        std::fs::hard_link(&a, &link).unwrap();
++
++        let id = |p: &Path| p.get_device_and_inode().unwrap();
++        assert_eq!(id(dir.path()), id(&sub.join("..")));
++        assert_eq!(id(&a), id(&link));
++        assert_ne!(id(&a), id(&b));
++        assert_ne!(id(dir.path()), id(&sub));
++    }
+ }
+diff --git a/brush-core/src/sys/windows/fs.rs b/brush-core/src/sys/windows/fs.rs
+index b336a699..bcbf4610 100644
+--- a/brush-core/src/sys/windows/fs.rs
++++ b/brush-core/src/sys/windows/fs.rs
+@@ -179,8 +179,11 @@ impl crate::sys::fs::PathExt for Path {
+     }
+ 
+     fn get_device_and_inode(&self) -> Result<(u64, u64), crate::error::Error> {
+-        // TODO(windows): implement using file index / volume serial number.
+-        Err(error::ErrorKind::NotSupportedOnThisPlatform("get_device_and_inode").into())
++        // The volume serial number and file index identify a file as st_dev and
++        // st_ino do. `from_path_any` also opens directories.
++        let handle = winapi_util::Handle::from_path_any(self)?;
++        let info = winapi_util::file::information(&handle)?;
++        Ok((info.volume_serial_number(), info.file_index()))
+     }
+ }
+ 

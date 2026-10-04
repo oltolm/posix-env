@@ -1,0 +1,523 @@
+From 286236ba1d25ffaca3a4996c4b7adc9c1bb4e016 Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Sun, 4 Oct 2026 12:20:18 +0200
+Subject: [PATCH 21/21] feat(windows): replace libtool's MSYS path conversion
+
+With build and host both MinGW, libtool assumes the shell is MSYS and
+converts paths with `cmd //c echo PATH`, relying on MSYS to turn `//c`
+into `/c`.  A native shell passes `//c` through unchanged; cmd.exe does
+not take it as a switch and starts an interactive session, so linking
+a DLL hangs or links against cmd.exe's banner.
+
+Replace the conversion with the same sed transformation, minus cmd: the
+paths are Windows paths already.  libtool 2.4 to 2.4.2 converts inline
+in func_to_host_path and func_to_host_pathlist (a generated copy of the
+latter differs by an article in a diagnostic); 2.4.3 and later call
+func_convert_core_msys_to_w32, whose 2.6 version also handles the
+original MSYS's `cmd /c`.
+
+Assisted-by: Claude Code:claude-opus-5-5
+---
+ brush-core/src/compat.rs                      | 28 ++++++++
+ .../compat/libtool-2.4-to-host-path-fixed.sh  | 36 ++++++++++
+ .../src/compat/libtool-2.4-to-host-path.sh    | 36 ++++++++++
+ .../libtool-2.4-to-host-pathlist-fixed.sh     | 64 ++++++++++++++++++
+ .../libtool-2.4-to-host-pathlist-the.sh       | 59 +++++++++++++++++
+ .../compat/libtool-2.4-to-host-pathlist.sh    | 59 +++++++++++++++++
+ .../libtool-2.4.6-convert-core-msys-to-w32.sh |  8 +++
+ .../libtool-2.6-convert-core-msys-to-w32.sh   | 17 +++++
+ .../libtool-convert-core-msys-to-w32-fixed.sh |  9 +++
+ brush-core/tests/windows_compat_tests.rs      | 65 +++++++++++++++++--
+ 10 files changed, 377 insertions(+), 4 deletions(-)
+ create mode 100644 brush-core/src/compat/libtool-2.4-to-host-path-fixed.sh
+ create mode 100644 brush-core/src/compat/libtool-2.4-to-host-path.sh
+ create mode 100644 brush-core/src/compat/libtool-2.4-to-host-pathlist-fixed.sh
+ create mode 100644 brush-core/src/compat/libtool-2.4-to-host-pathlist-the.sh
+ create mode 100644 brush-core/src/compat/libtool-2.4-to-host-pathlist.sh
+ create mode 100644 brush-core/src/compat/libtool-2.4.6-convert-core-msys-to-w32.sh
+ create mode 100644 brush-core/src/compat/libtool-2.6-convert-core-msys-to-w32.sh
+ create mode 100644 brush-core/src/compat/libtool-convert-core-msys-to-w32-fixed.sh
+
+diff --git a/brush-core/src/compat.rs b/brush-core/src/compat.rs
+index c97fbf31..2b877432 100644
+--- a/brush-core/src/compat.rs
++++ b/brush-core/src/compat.rs
+@@ -31,6 +31,34 @@ const FUNCTIONS: &[Shim] = &[
+         faulty: include_str!("compat/libtool-2.4-normal-abspath.sh"),
+         fixed: include_str!("compat/libtool-2.4-normal-abspath-fixed.sh"),
+     },
++    // libtool 2.4 to 2.4.2 assumes every native MinGW shell is MSYS and uses
++    // `cmd //c` to trigger MSYS path conversion. Native Windows shells pass
++    // `//c` through unchanged, which starts an interactive cmd.exe and hangs.
++    Shim {
++        faulty: include_str!("compat/libtool-2.4-to-host-path.sh"),
++        fixed: include_str!("compat/libtool-2.4-to-host-path-fixed.sh"),
++    },
++    Shim {
++        faulty: include_str!("compat/libtool-2.4-to-host-pathlist.sh"),
++        fixed: include_str!("compat/libtool-2.4-to-host-pathlist-fixed.sh"),
++    },
++    // Some generated copies include "the" in a diagnostic, making their
++    // normalized function definition distinct from the ltmain.sh copy.
++    Shim {
++        faulty: include_str!("compat/libtool-2.4-to-host-pathlist-the.sh"),
++        fixed: include_str!("compat/libtool-2.4-to-host-pathlist-fixed.sh"),
++    },
++    // libtool 2.4.3 and later: the same `cmd //c` trick, moved into one
++    // function that every file and path list conversion calls.
++    Shim {
++        faulty: include_str!("compat/libtool-2.4.6-convert-core-msys-to-w32.sh"),
++        fixed: include_str!("compat/libtool-convert-core-msys-to-w32-fixed.sh"),
++    },
++    // libtool 2.6 also accepts the original MSYS's `cmd /c`.
++    Shim {
++        faulty: include_str!("compat/libtool-2.6-convert-core-msys-to-w32.sh"),
++        fixed: include_str!("compat/libtool-convert-core-msys-to-w32-fixed.sh"),
++    },
+ ];
+ 
+ /// Case commands to replace.
+diff --git a/brush-core/src/compat/libtool-2.4-to-host-path-fixed.sh b/brush-core/src/compat/libtool-2.4-to-host-path-fixed.sh
+new file mode 100644
+index 00000000..55156643
+--- /dev/null
++++ b/brush-core/src/compat/libtool-2.4-to-host-path-fixed.sh
+@@ -0,0 +1,36 @@
++func_to_host_path ()
++{
++  func_to_host_path_result="$1"
++  if test -n "$1"; then
++    case $host in
++      *mingw* )
++        lt_sed_naive_backslashify='s|\\\\*|\\|g;s|/|\\|g;s|\\|\\\\|g'
++        case $build in
++          *mingw* )
++            func_to_host_path_result=`$ECHO "$1" |
++              $SED -e "$lt_sed_naive_backslashify"`
++            ;;
++          *cygwin* )
++            func_to_host_path_result=`cygpath -w "$1" |
++	      $SED -e "$lt_sed_naive_backslashify"`
++            ;;
++          * )
++            func_to_host_path_tmp1=`winepath -w "$1" 2>/dev/null`
++            if test "$?" -eq 0 && test -n "${func_to_host_path_tmp1}"; then
++              func_to_host_path_result=`$ECHO "$func_to_host_path_tmp1" |
++                $SED -e "$lt_sed_naive_backslashify"`
++            else
++              func_to_host_path_result=
++            fi
++            ;;
++        esac
++        if test -z "$func_to_host_path_result" ; then
++          func_error "Could not determine host path corresponding to"
++          func_error "  \`$1'"
++          func_error "Continuing, but uninstalled executables may not work."
++          func_to_host_path_result="$1"
++        fi
++        ;;
++    esac
++  fi
++}
+diff --git a/brush-core/src/compat/libtool-2.4-to-host-path.sh b/brush-core/src/compat/libtool-2.4-to-host-path.sh
+new file mode 100644
+index 00000000..08c8cf89
+--- /dev/null
++++ b/brush-core/src/compat/libtool-2.4-to-host-path.sh
+@@ -0,0 +1,36 @@
++func_to_host_path ()
++{
++  func_to_host_path_result="$1"
++  if test -n "$1"; then
++    case $host in
++      *mingw* )
++        lt_sed_naive_backslashify='s|\\\\*|\\|g;s|/|\\|g;s|\\|\\\\|g'
++        case $build in
++          *mingw* )
++            func_to_host_path_result=`( cmd //c echo "$1" ) 2>/dev/null |
++              $SED -e 's/[ ]*$//' -e "$lt_sed_naive_backslashify"`
++            ;;
++          *cygwin* )
++            func_to_host_path_result=`cygpath -w "$1" |
++	      $SED -e "$lt_sed_naive_backslashify"`
++            ;;
++          * )
++            func_to_host_path_tmp1=`winepath -w "$1" 2>/dev/null`
++            if test "$?" -eq 0 && test -n "${func_to_host_path_tmp1}"; then
++              func_to_host_path_result=`$ECHO "$func_to_host_path_tmp1" |
++                $SED -e "$lt_sed_naive_backslashify"`
++            else
++              func_to_host_path_result=
++            fi
++            ;;
++        esac
++        if test -z "$func_to_host_path_result" ; then
++          func_error "Could not determine host path corresponding to"
++          func_error "  \`$1'"
++          func_error "Continuing, but uninstalled executables may not work."
++          func_to_host_path_result="$1"
++        fi
++        ;;
++    esac
++  fi
++}
+diff --git a/brush-core/src/compat/libtool-2.4-to-host-pathlist-fixed.sh b/brush-core/src/compat/libtool-2.4-to-host-pathlist-fixed.sh
+new file mode 100644
+index 00000000..db99d908
+--- /dev/null
++++ b/brush-core/src/compat/libtool-2.4-to-host-pathlist-fixed.sh
+@@ -0,0 +1,64 @@
++func_to_host_pathlist ()
++{
++  func_to_host_pathlist_result="$1"
++  if test -n "$1"; then
++    case $host in
++      *mingw* )
++        lt_sed_naive_backslashify='s|\\\\*|\\|g;s|/|\\|g;s|\\|\\\\|g'
++	func_stripname : : "$1"
++        func_to_host_pathlist_tmp1=$func_stripname_result
++        case $build in
++          *mingw* )
++            lt_sed_protect_drive_colon='s|\([A-Za-z]\):/|\1@_LT_DRIVE_COLON_@/|g'
++            lt_sed_pathsep_to_semicolon='s|:|;|g'
++            lt_sed_restore_drive_colon='s|@_LT_DRIVE_COLON_@|:|g'
++            func_to_host_pathlist_result=`$ECHO "$func_to_host_pathlist_tmp1" |
++	      $SED -e "$lt_sed_protect_drive_colon" \
++                -e "$lt_sed_pathsep_to_semicolon" \
++                -e "$lt_sed_restore_drive_colon" \
++                -e "$lt_sed_naive_backslashify"`
++            ;;
++          *cygwin* )
++            func_to_host_pathlist_result=`cygpath -w -p "$func_to_host_pathlist_tmp1" |
++              $SED -e "$lt_sed_naive_backslashify"`
++            ;;
++          * )
++            func_to_host_pathlist_result=""
++            func_to_host_pathlist_oldIFS=$IFS
++            IFS=:
++            for func_to_host_pathlist_f in $func_to_host_pathlist_tmp1 ; do
++              IFS=$func_to_host_pathlist_oldIFS
++              if test -n "$func_to_host_pathlist_f" ; then
++                func_to_host_path "$func_to_host_pathlist_f"
++                if test -n "$func_to_host_path_result" ; then
++                  if test -z "$func_to_host_pathlist_result" ; then
++                    func_to_host_pathlist_result="$func_to_host_path_result"
++                  else
++                    func_append func_to_host_pathlist_result ";$func_to_host_path_result"
++                  fi
++                fi
++              fi
++            done
++            IFS=$func_to_host_pathlist_oldIFS
++            ;;
++        esac
++        if test -z "$func_to_host_pathlist_result"; then
++          func_error "Could not determine host path(s) corresponding to"
++          func_error "  \`$1'"
++          func_error "Continuing, but uninstalled executables may not work."
++          lt_replace_pathsep_nix_to_dos="s|:|;|g"
++          func_to_host_pathlist_result=`echo "$func_to_host_pathlist_tmp1" |\
++            $SED -e "$lt_replace_pathsep_nix_to_dos"`
++        fi
++        case "$1" in
++          :* ) func_to_host_pathlist_result=";$func_to_host_pathlist_result"
++            ;;
++        esac
++        case "$1" in
++          *: ) func_append func_to_host_pathlist_result ";"
++            ;;
++        esac
++        ;;
++    esac
++  fi
++}
+diff --git a/brush-core/src/compat/libtool-2.4-to-host-pathlist-the.sh b/brush-core/src/compat/libtool-2.4-to-host-pathlist-the.sh
+new file mode 100644
+index 00000000..30504bdd
+--- /dev/null
++++ b/brush-core/src/compat/libtool-2.4-to-host-pathlist-the.sh
+@@ -0,0 +1,59 @@
++func_to_host_pathlist ()
++{
++  func_to_host_pathlist_result="$1"
++  if test -n "$1"; then
++    case $host in
++      *mingw* )
++        lt_sed_naive_backslashify='s|\\\\*|\\|g;s|/|\\|g;s|\\|\\\\|g'
++	func_stripname : : "$1"
++        func_to_host_pathlist_tmp1=$func_stripname_result
++        case $build in
++          *mingw* )
++            func_to_host_pathlist_result=`
++	      ( cmd //c echo "$func_to_host_pathlist_tmp1" ) 2>/dev/null |
++	      $SED -e 's/[ ]*$//' -e "$lt_sed_naive_backslashify"`
++            ;;
++          *cygwin* )
++            func_to_host_pathlist_result=`cygpath -w -p "$func_to_host_pathlist_tmp1" |
++              $SED -e "$lt_sed_naive_backslashify"`
++            ;;
++          * )
++            func_to_host_pathlist_result=""
++            func_to_host_pathlist_oldIFS=$IFS
++            IFS=:
++            for func_to_host_pathlist_f in $func_to_host_pathlist_tmp1 ; do
++              IFS=$func_to_host_pathlist_oldIFS
++              if test -n "$func_to_host_pathlist_f" ; then
++                func_to_host_path "$func_to_host_pathlist_f"
++                if test -n "$func_to_host_path_result" ; then
++                  if test -z "$func_to_host_pathlist_result" ; then
++                    func_to_host_pathlist_result="$func_to_host_path_result"
++                  else
++                    func_append func_to_host_pathlist_result ";$func_to_host_path_result"
++                  fi
++                fi
++              fi
++            done
++            IFS=$func_to_host_pathlist_oldIFS
++            ;;
++        esac
++        if test -z "$func_to_host_pathlist_result"; then
++          func_error "Could not determine the host path(s) corresponding to"
++          func_error "  \`$1'"
++          func_error "Continuing, but uninstalled executables may not work."
++          lt_replace_pathsep_nix_to_dos="s|:|;|g"
++          func_to_host_pathlist_result=`echo "$func_to_host_pathlist_tmp1" |\
++            $SED -e "$lt_replace_pathsep_nix_to_dos"`
++        fi
++        case "$1" in
++          :* ) func_to_host_pathlist_result=";$func_to_host_pathlist_result"
++            ;;
++        esac
++        case "$1" in
++          *: ) func_append func_to_host_pathlist_result ";"
++            ;;
++        esac
++        ;;
++    esac
++  fi
++}
+diff --git a/brush-core/src/compat/libtool-2.4-to-host-pathlist.sh b/brush-core/src/compat/libtool-2.4-to-host-pathlist.sh
+new file mode 100644
+index 00000000..3952171c
+--- /dev/null
++++ b/brush-core/src/compat/libtool-2.4-to-host-pathlist.sh
+@@ -0,0 +1,59 @@
++func_to_host_pathlist ()
++{
++  func_to_host_pathlist_result="$1"
++  if test -n "$1"; then
++    case $host in
++      *mingw* )
++        lt_sed_naive_backslashify='s|\\\\*|\\|g;s|/|\\|g;s|\\|\\\\|g'
++	func_stripname : : "$1"
++        func_to_host_pathlist_tmp1=$func_stripname_result
++        case $build in
++          *mingw* )
++            func_to_host_pathlist_result=`
++	      ( cmd //c echo "$func_to_host_pathlist_tmp1" ) 2>/dev/null |
++	      $SED -e 's/[ ]*$//' -e "$lt_sed_naive_backslashify"`
++            ;;
++          *cygwin* )
++            func_to_host_pathlist_result=`cygpath -w -p "$func_to_host_pathlist_tmp1" |
++              $SED -e "$lt_sed_naive_backslashify"`
++            ;;
++          * )
++            func_to_host_pathlist_result=""
++            func_to_host_pathlist_oldIFS=$IFS
++            IFS=:
++            for func_to_host_pathlist_f in $func_to_host_pathlist_tmp1 ; do
++              IFS=$func_to_host_pathlist_oldIFS
++              if test -n "$func_to_host_pathlist_f" ; then
++                func_to_host_path "$func_to_host_pathlist_f"
++                if test -n "$func_to_host_path_result" ; then
++                  if test -z "$func_to_host_pathlist_result" ; then
++                    func_to_host_pathlist_result="$func_to_host_path_result"
++                  else
++                    func_append func_to_host_pathlist_result ";$func_to_host_path_result"
++                  fi
++                fi
++              fi
++            done
++            IFS=$func_to_host_pathlist_oldIFS
++            ;;
++        esac
++        if test -z "$func_to_host_pathlist_result"; then
++          func_error "Could not determine host path(s) corresponding to"
++          func_error "  \`$1'"
++          func_error "Continuing, but uninstalled executables may not work."
++          lt_replace_pathsep_nix_to_dos="s|:|;|g"
++          func_to_host_pathlist_result=`echo "$func_to_host_pathlist_tmp1" |\
++            $SED -e "$lt_replace_pathsep_nix_to_dos"`
++        fi
++        case "$1" in
++          :* ) func_to_host_pathlist_result=";$func_to_host_pathlist_result"
++            ;;
++        esac
++        case "$1" in
++          *: ) func_append func_to_host_pathlist_result ";"
++            ;;
++        esac
++        ;;
++    esac
++  fi
++}
+diff --git a/brush-core/src/compat/libtool-2.4.6-convert-core-msys-to-w32.sh b/brush-core/src/compat/libtool-2.4.6-convert-core-msys-to-w32.sh
+new file mode 100644
+index 00000000..c3cb7b96
+--- /dev/null
++++ b/brush-core/src/compat/libtool-2.4.6-convert-core-msys-to-w32.sh
+@@ -0,0 +1,8 @@
++func_convert_core_msys_to_w32 ()
++{
++  $debug_cmd
++
++  # awkward: cmd appends spaces to result
++  func_convert_core_msys_to_w32_result=`( cmd //c echo "$1" ) 2>/dev/null |
++    $SED -e 's/[ ]*$//' -e "$sed_naive_backslashify"`
++}
+diff --git a/brush-core/src/compat/libtool-2.6-convert-core-msys-to-w32.sh b/brush-core/src/compat/libtool-2.6-convert-core-msys-to-w32.sh
+new file mode 100644
+index 00000000..71d1815c
+--- /dev/null
++++ b/brush-core/src/compat/libtool-2.6-convert-core-msys-to-w32.sh
+@@ -0,0 +1,17 @@
++func_convert_core_msys_to_w32 ()
++{
++  $debug_cmd
++
++  # Compatibility for original MSYS
++  if test "Xone" = "X$lt_cv_cmd_slashes"; then
++  func_convert_core_msys_to_w32_result=`( cmd /c echo "$1" ) 2>/dev/null |
++    $SED -e 's/[ ]*$//' -e "$sed_naive_backslashify"`
++  else # Assume 'lt_cv_cmd_slashes = "two"'
++  func_convert_core_msys_to_w32_result=`( cmd //c echo "$1" ) 2>/dev/null |
++    $SED -e 's/[ ]*$//' -e "$sed_naive_backslashify"`
++  fi
++  if test "$?" -ne 0; then
++      # on failure, ensure result is empty
++      func_convert_core_msys_to_w32_result=
++  fi
++}
+diff --git a/brush-core/src/compat/libtool-convert-core-msys-to-w32-fixed.sh b/brush-core/src/compat/libtool-convert-core-msys-to-w32-fixed.sh
+new file mode 100644
+index 00000000..60126509
+--- /dev/null
++++ b/brush-core/src/compat/libtool-convert-core-msys-to-w32-fixed.sh
+@@ -0,0 +1,9 @@
++func_convert_core_msys_to_w32 ()
++{
++  $debug_cmd
++
++  # A native Windows shell has no MSYS path conversion, and its paths are
++  # Windows paths already.
++  func_convert_core_msys_to_w32_result=`$ECHO "$1" |
++    $SED -e "$sed_naive_backslashify"`
++}
+diff --git a/brush-core/tests/windows_compat_tests.rs b/brush-core/tests/windows_compat_tests.rs
+index df2b026d..9cbad295 100644
+--- a/brush-core/tests/windows_compat_tests.rs
++++ b/brush-core/tests/windows_compat_tests.rs
+@@ -15,12 +15,12 @@ async fn run(shell: &mut brush_core::Shell, script: &str) -> Result<()> {
+     Ok(())
+ }
+ 
+-async fn defined_as(faulty: &str, expected: &str) -> Result<()> {
++async fn defined_as(name: &str, faulty: &str, expected: &str) -> Result<()> {
+     let mut shell = brush_core::Shell::builder().build().await?;
+     run(&mut shell, faulty).await?;
+     let defined = shell
+         .funcs()
+-        .get("func_normal_abspath")
++        .get(name)
+         .expect("function not defined")
+         .definition()
+         .to_string();
+@@ -29,7 +29,7 @@ async fn defined_as(faulty: &str, expected: &str) -> Result<()> {
+     run(&mut reference, expected).await?;
+     let expected = reference
+         .funcs()
+-        .get("func_normal_abspath")
++        .get(name)
+         .expect("function not defined")
+         .definition()
+         .to_string();
+@@ -42,6 +42,7 @@ async fn defined_as(faulty: &str, expected: &str) -> Result<()> {
+ #[tokio::test]
+ async fn libtool_2_2_normal_abspath_is_replaced() -> Result<()> {
+     defined_as(
++        "func_normal_abspath",
+         include_str!("../src/compat/libtool-2.2-normal-abspath.sh"),
+         include_str!("../src/compat/libtool-2.2-normal-abspath-fixed.sh"),
+     )
+@@ -52,6 +53,7 @@ async fn libtool_2_2_normal_abspath_is_replaced() -> Result<()> {
+ #[tokio::test]
+ async fn libtool_2_4_normal_abspath_is_replaced() -> Result<()> {
+     defined_as(
++        "func_normal_abspath",
+         include_str!("../src/compat/libtool-2.4-normal-abspath.sh"),
+         include_str!("../src/compat/libtool-2.4-normal-abspath-fixed.sh"),
+     )
+@@ -62,7 +64,62 @@ async fn libtool_2_4_normal_abspath_is_replaced() -> Result<()> {
+ #[tokio::test]
+ async fn other_normal_abspath_is_kept() -> Result<()> {
+     let own = "func_normal_abspath () { func_normal_abspath_result=$1; }\n";
+-    defined_as(own, own).await
++    defined_as("func_normal_abspath", own, own).await
++}
++
++/// Libtool must not use MSYS's `cmd //c` path-conversion trick in a native
++/// Windows shell.
++#[tokio::test]
++async fn libtool_to_host_path_is_replaced() -> Result<()> {
++    defined_as(
++        "func_to_host_path",
++        include_str!("../src/compat/libtool-2.4-to-host-path.sh"),
++        include_str!("../src/compat/libtool-2.4-to-host-path-fixed.sh"),
++    )
++    .await
++}
++
++#[tokio::test]
++async fn libtool_to_host_pathlist_is_replaced() -> Result<()> {
++    defined_as(
++        "func_to_host_pathlist",
++        include_str!("../src/compat/libtool-2.4-to-host-pathlist.sh"),
++        include_str!("../src/compat/libtool-2.4-to-host-pathlist-fixed.sh"),
++    )
++    .await
++}
++
++/// Generated libtool scripts can differ from ltmain.sh only by an article in
++/// an error message; that exact variant must be replaced as well.
++#[tokio::test]
++async fn generated_libtool_to_host_pathlist_is_replaced() -> Result<()> {
++    defined_as(
++        "func_to_host_pathlist",
++        include_str!("../src/compat/libtool-2.4-to-host-pathlist-the.sh"),
++        include_str!("../src/compat/libtool-2.4-to-host-pathlist-fixed.sh"),
++    )
++    .await
++}
++
++/// libtool 2.4.3 and later keep the `cmd //c` trick in one conversion function.
++#[tokio::test]
++async fn libtool_2_4_6_convert_core_msys_to_w32_is_replaced() -> Result<()> {
++    defined_as(
++        "func_convert_core_msys_to_w32",
++        include_str!("../src/compat/libtool-2.4.6-convert-core-msys-to-w32.sh"),
++        include_str!("../src/compat/libtool-convert-core-msys-to-w32-fixed.sh"),
++    )
++    .await
++}
++
++#[tokio::test]
++async fn libtool_2_6_convert_core_msys_to_w32_is_replaced() -> Result<()> {
++    defined_as(
++        "func_convert_core_msys_to_w32",
++        include_str!("../src/compat/libtool-2.6-convert-core-msys-to-w32.sh"),
++        include_str!("../src/compat/libtool-convert-core-msys-to-w32-fixed.sh"),
++    )
++    .await
+ }
+ 
+ /// gettext's `AM_PO_SUBDIRS` takes only /... for an absolute srcdir.

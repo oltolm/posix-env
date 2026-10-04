@@ -1,0 +1,15 @@
+From MSYS2's mingw-w64-perl (012-errno-gen-reduce-includes.patch).
+
+diff --git a/ext/Errno/Errno_pm.PL b/ext/Errno/Errno_pm.PL
+index 89d21b8..b366374 100644
+--- a/ext/Errno/Errno_pm.PL
++++ b/ext/Errno/Errno_pm.PL
+@@ -20,7 +20,7 @@ if ($Config{gccversion} ne '' && $^O eq 'MSWin32') {
+     # all in .c file and process that instead.
+     open INCS, '>', 'includes.c' or
+ 	die "Cannot open includes.c";
+-    foreach $file (@files) {
++    foreach $file (grep { /errno/ } @files) {
+ 	next if $file eq 'errno.c';
+ 	next unless -f $file;
+ 	print INCS qq[#include "$file"\n];

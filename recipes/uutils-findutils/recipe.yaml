@@ -1,0 +1,48 @@
+context:
+  version: "0.10.0"
+
+package:
+  name: uutils-findutils
+  version: ${{ version }}
+
+source:
+  url: https://github.com/uutils/findutils/archive/refs/tags/${{ version }}.tar.gz
+  sha256: e36ae3937f889bc59cfbd65820a642baa695c58d7fa1e387e41857e710f40419
+  patches:
+    # Paths below a starting point are joined with '/', as GNU find does;
+    # scripts paste them into sed and eval, where '\' is an escape.
+    - 0001-find-join-entries-below-a-starting-point-with-on-Win.patch
+
+build:
+  number: 1
+  script:
+    interpreter: brush
+    content:
+      # Link the packaged oniguruma; without pkg-config finding it, onig_sys
+      # silently builds its bundled copy.
+      - export RUSTONIG_SYSTEM_LIBONIG=1 RUSTONIG_DYNAMIC_LIBONIG=1
+      - export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
+      - cargo build --profile=release-fast --locked --bin find --bin xargs
+      - mkdir -p "$PREFIX/bin"
+      - cp target/release-fast/find.exe target/release-fast/xargs.exe "$PREFIX/bin/"
+
+requirements:
+  build:
+    - posix-env
+    - pkgconf
+  host:
+    - oniguruma
+
+tests:
+  - script:
+      interpreter: cmd
+      content:
+        - find --version
+        - xargs --version
+        - find . -maxdepth 0 | findstr /b . || exit /b 1
+
+about:
+  homepage: https://github.com/uutils/findutils
+  license: MIT
+  license_file: LICENSE
+  summary: Rust rewrite of GNU findutils (find and xargs)

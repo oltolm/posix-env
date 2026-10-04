@@ -1,0 +1,717 @@
+From 39b3c3beeedb7e37ca0bc591a4d376f4d1071243 Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Fri, 2 Oct 2026 17:02:54 +0200
+Subject: [PATCH 15/21] feat(windows): replace known-faulty libtool and gettext
+ code
+
+libtool's func_normal_abspath (2.2 through 2.6) takes only "/..." as an
+absolute path.  Given a C:/ path it prepends the working directory and
+never terminates; linking a DLL with -bindir reaches it, so libtool
+hangs.  gettext's AM_PO_SUBDIRS code in config.status makes the same
+assumption and writes ../C:/... paths into po/POTFILES, which breaks
+the build of the po directories.
+
+Every source tree and release tarball carries its own copy of this
+code, so fixing it upstream does not help existing packages.  Recognize
+the exact faulty function definitions and case command when they are
+executed, and execute fixed versions instead.  Code is compared in its
+printed form, which ignores comments and indentation, after a cheap
+check of the function name or the case word.
+
+Assisted-by: Claude Code:claude-opus-5-5
+---
+ brush-core/src/compat.rs                      | 137 ++++++++++++++++++
+ .../src/compat/gettext-po-srcdir-fixed.sh     |   5 +
+ brush-core/src/compat/gettext-po-srcdir.sh    |   5 +
+ .../libtool-2.2-normal-abspath-fixed.sh       |  82 +++++++++++
+ .../src/compat/libtool-2.2-normal-abspath.sh  |  70 +++++++++
+ .../libtool-2.4-normal-abspath-fixed.sh       |  95 ++++++++++++
+ .../src/compat/libtool-2.4-normal-abspath.sh  |  83 +++++++++++
+ brush-core/src/interp.rs                      |  14 +-
+ brush-core/src/lib.rs                         |   2 +
+ brush-core/tests/windows_compat_tests.rs      | 104 +++++++++++++
+ 10 files changed, 596 insertions(+), 1 deletion(-)
+ create mode 100644 brush-core/src/compat.rs
+ create mode 100644 brush-core/src/compat/gettext-po-srcdir-fixed.sh
+ create mode 100644 brush-core/src/compat/gettext-po-srcdir.sh
+ create mode 100644 brush-core/src/compat/libtool-2.2-normal-abspath-fixed.sh
+ create mode 100644 brush-core/src/compat/libtool-2.2-normal-abspath.sh
+ create mode 100644 brush-core/src/compat/libtool-2.4-normal-abspath-fixed.sh
+ create mode 100644 brush-core/src/compat/libtool-2.4-normal-abspath.sh
+ create mode 100644 brush-core/tests/windows_compat_tests.rs
+
+diff --git a/brush-core/src/compat.rs b/brush-core/src/compat.rs
+new file mode 100644
+index 00000000..c97fbf31
+--- /dev/null
++++ b/brush-core/src/compat.rs
+@@ -0,0 +1,137 @@
++//! Compatibility shims for generated build scripts.
++//!
++//! Some widely copied shell code from libtool and gettext takes only "/..." as an
++//! absolute path, and fails on the drive-letter paths a native Windows shell
++//! uses. Every source tree and release tarball carries its own copy, so the
++//! shell recognizes the exact faulty code and runs a fixed version instead.
++//! Matching compares the code's normalized form, which ignores comments and
++//! indentation, so one entry covers copies that differ only in those.
++
++use std::sync::OnceLock;
++
++use brush_parser::ast;
++
++use crate::trace_categories;
++
++/// Faulty code and its replacement.
++struct Shim {
++    faulty: &'static str,
++    fixed: &'static str,
++}
++
++/// Function definitions to replace.
++const FUNCTIONS: &[Shim] = &[
++    // libtool 2.2: func_normal_abspath never terminates on a C:/ path.
++    Shim {
++        faulty: include_str!("compat/libtool-2.2-normal-abspath.sh"),
++        fixed: include_str!("compat/libtool-2.2-normal-abspath-fixed.sh"),
++    },
++    // libtool 2.4 to 2.6: the same bug.
++    Shim {
++        faulty: include_str!("compat/libtool-2.4-normal-abspath.sh"),
++        fixed: include_str!("compat/libtool-2.4-normal-abspath-fixed.sh"),
++    },
++];
++
++/// Case commands to replace.
++const CASES: &[Shim] = &[
++    // gettext AM_PO_SUBDIRS (config.status): a C:/ srcdir is made relative, so
++    // po/POTFILES lists ../C:/... paths.
++    Shim {
++        faulty: include_str!("compat/gettext-po-srcdir.sh"),
++        fixed: include_str!("compat/gettext-po-srcdir-fixed.sh"),
++    },
++];
++
++/// A parsed shim: a cheap key to filter candidates, the faulty code's
++/// normalized form, and the replacement.
++struct Parsed<T> {
++    key: String,
++    faulty: String,
++    fixed: T,
++}
++
++fn parse_command(text: &str) -> ast::Command {
++    let mut parser =
++        brush_parser::Parser::new(text.as_bytes(), &brush_parser::ParserOptions::default());
++    #[allow(clippy::expect_used)]
++    let program = parser.parse_program().expect("compat shim must parse");
++    program
++        .complete_commands
++        .into_iter()
++        .next()
++        .and_then(|list| list.0.into_iter().next())
++        .and_then(|item| item.0.first.seq.into_iter().next())
++        .unwrap_or_else(|| unreachable!("compat shim must hold a command"))
++}
++
++fn parse_function(text: &str) -> ast::FunctionDefinition {
++    match parse_command(text) {
++        ast::Command::Function(def) => def,
++        _ => unreachable!("compat shim must be a function definition"),
++    }
++}
++
++fn parse_case(text: &str) -> ast::CaseClauseCommand {
++    match parse_command(text) {
++        ast::Command::Compound(ast::CompoundCommand::CaseClause(cmd), None) => cmd,
++        _ => unreachable!("compat shim must be a case command"),
++    }
++}
++
++fn functions() -> &'static [Parsed<ast::FunctionDefinition>] {
++    static PARSED: OnceLock<Vec<Parsed<ast::FunctionDefinition>>> = OnceLock::new();
++    PARSED.get_or_init(|| {
++        FUNCTIONS
++            .iter()
++            .map(|shim| {
++                let faulty = parse_function(shim.faulty);
++                Parsed {
++                    key: faulty.fname.value.clone(),
++                    faulty: faulty.to_string(),
++                    fixed: parse_function(shim.fixed),
++                }
++            })
++            .collect()
++    })
++}
++
++fn cases() -> &'static [Parsed<ast::CaseClauseCommand>] {
++    static PARSED: OnceLock<Vec<Parsed<ast::CaseClauseCommand>>> = OnceLock::new();
++    PARSED.get_or_init(|| {
++        CASES
++            .iter()
++            .map(|shim| {
++                let faulty = parse_case(shim.faulty);
++                Parsed {
++                    key: faulty.value.value.clone(),
++                    faulty: faulty.to_string(),
++                    fixed: parse_case(shim.fixed),
++                }
++            })
++            .collect()
++    })
++}
++
++fn find<'a, T>(shims: &'a [Parsed<T>], key: &str, node: &impl ToString) -> Option<&'a T> {
++    let mut candidates = shims.iter().filter(|shim| shim.key == key).peekable();
++    candidates.peek()?;
++    let text = node.to_string();
++    let shim = candidates.find(|shim| shim.faulty == text)?;
++    tracing::debug!(target: trace_categories::COMMANDS, "compat: replacing known-faulty code:\n{text}");
++    Some(&shim.fixed)
++}
++
++/// Returns the replacement for a known-faulty function definition.
++pub(crate) fn function_replacement(
++    def: &ast::FunctionDefinition,
++) -> Option<&'static ast::FunctionDefinition> {
++    find(functions(), &def.fname.value, def)
++}
++
++/// Returns the replacement for a known-faulty case command.
++pub(crate) fn case_replacement(
++    cmd: &ast::CaseClauseCommand,
++) -> Option<&'static ast::CaseClauseCommand> {
++    find(cases(), &cmd.value.value, cmd)
++}
+diff --git a/brush-core/src/compat/gettext-po-srcdir-fixed.sh b/brush-core/src/compat/gettext-po-srcdir-fixed.sh
+new file mode 100644
+index 00000000..7f7bb200
+--- /dev/null
++++ b/brush-core/src/compat/gettext-po-srcdir-fixed.sh
+@@ -0,0 +1,5 @@
++case "$ac_given_srcdir" in
++  .)  top_srcdir=`echo $ac_dots|sed 's%/$%%'` ;;
++  /* | [A-Za-z]:[\\/]*) top_srcdir="$ac_given_srcdir" ;;
++  *)  top_srcdir="$ac_dots$ac_given_srcdir" ;;
++esac
+diff --git a/brush-core/src/compat/gettext-po-srcdir.sh b/brush-core/src/compat/gettext-po-srcdir.sh
+new file mode 100644
+index 00000000..500ba1f4
+--- /dev/null
++++ b/brush-core/src/compat/gettext-po-srcdir.sh
+@@ -0,0 +1,5 @@
++case "$ac_given_srcdir" in
++  .)  top_srcdir=`echo $ac_dots|sed 's%/$%%'` ;;
++  /*) top_srcdir="$ac_given_srcdir" ;;
++  *)  top_srcdir="$ac_dots$ac_given_srcdir" ;;
++esac
+diff --git a/brush-core/src/compat/libtool-2.2-normal-abspath-fixed.sh b/brush-core/src/compat/libtool-2.2-normal-abspath-fixed.sh
+new file mode 100644
+index 00000000..4852cdfd
+--- /dev/null
++++ b/brush-core/src/compat/libtool-2.2-normal-abspath-fixed.sh
+@@ -0,0 +1,82 @@
++func_normal_abspath ()
++{
++  # Start from root dir and reassemble the path.
++  func_normal_abspath_result=
++  func_normal_abspath_tpath=$1
++  func_normal_abspath_altnamespace=
++  case $func_normal_abspath_tpath in
++    "")
++      # Empty path, that just means $cwd.
++      func_stripname '' '/' "`pwd`"
++      func_normal_abspath_result=$func_stripname_result
++      return
++    ;;
++    # The next three entries are used to spot a run of precisely
++    # two leading slashes without using negated character classes;
++    # we take advantage of case's first-match behaviour.
++    ///*)
++      # Unusual form of absolute path, do nothing.
++    ;;
++    //*)
++      # Not necessarily an ordinary path; POSIX reserves leading '//'
++      # and for example Cygwin uses it to access remote file shares
++      # over CIFS/SMB, so we conserve a leading double slash if found.
++      func_normal_abspath_altnamespace=/
++    ;;
++    /*)
++      # Absolute path, do nothing.
++    ;;
++    [a-zA-Z]:/*)
++      # Absolute path with a drive letter, as a native Windows shell spells it.
++    ;;
++    *)
++      # Relative path, prepend $cwd.
++      func_normal_abspath_tpath=`pwd`/$func_normal_abspath_tpath
++    ;;
++  esac
++  # The loop below consumes the path one leading "/component" at a time, so a
++  # drive letter (possibly from `pwd` above) would never be consumed.  Set it
++  # aside like a leading double slash.
++  case $func_normal_abspath_tpath in
++    [a-zA-Z]:/*)
++      func_normal_abspath_altnamespace=`$ECHO "$func_normal_abspath_tpath" | $SED 's,^\(..\).*,\1,'`
++      func_normal_abspath_tpath=`$ECHO "$func_normal_abspath_tpath" | $SED 's,^..,,'`
++    ;;
++  esac
++  # Cancel out all the simple stuff to save iterations.  We also want
++  # the path to end with a slash for ease of parsing, so make sure
++  # there is one (and only one) here.
++  func_normal_abspath_tpath=`$ECHO "$func_normal_abspath_tpath" | $SED \
++        -e "$removedotparts" -e "$collapseslashes" -e "$finalslash"`
++  while :; do
++    # Processed it all yet?
++    if test "$func_normal_abspath_tpath" = / ; then
++      # If we ascended to the root using ".." the result may be empty now.
++      if test -z "$func_normal_abspath_result" ; then
++        func_normal_abspath_result=/
++      fi
++      break
++    fi
++    func_normal_abspath_tcomponent=`$ECHO "$func_normal_abspath_tpath" | $SED \
++        -e "$pathcar"`
++    func_normal_abspath_tpath=`$ECHO "$func_normal_abspath_tpath" | $SED \
++        -e "$pathcdr"`
++    # Figure out what to do with it
++    case $func_normal_abspath_tcomponent in
++      "")
++        # Trailing empty path component, ignore it.
++      ;;
++      ..)
++        # Parent dir; strip last assembled component from result.
++        func_dirname "$func_normal_abspath_result"
++        func_normal_abspath_result=$func_dirname_result
++      ;;
++      *)
++        # Actual path component, append it.
++        func_normal_abspath_result=$func_normal_abspath_result/$func_normal_abspath_tcomponent
++      ;;
++    esac
++  done
++  # Restore leading double-slash if one was found on entry.
++  func_normal_abspath_result=$func_normal_abspath_altnamespace$func_normal_abspath_result
++}
+diff --git a/brush-core/src/compat/libtool-2.2-normal-abspath.sh b/brush-core/src/compat/libtool-2.2-normal-abspath.sh
+new file mode 100644
+index 00000000..3c25b7a6
+--- /dev/null
++++ b/brush-core/src/compat/libtool-2.2-normal-abspath.sh
+@@ -0,0 +1,70 @@
++func_normal_abspath ()
++{
++  # Start from root dir and reassemble the path.
++  func_normal_abspath_result=
++  func_normal_abspath_tpath=$1
++  func_normal_abspath_altnamespace=
++  case $func_normal_abspath_tpath in
++    "")
++      # Empty path, that just means $cwd.
++      func_stripname '' '/' "`pwd`"
++      func_normal_abspath_result=$func_stripname_result
++      return
++    ;;
++    # The next three entries are used to spot a run of precisely
++    # two leading slashes without using negated character classes;
++    # we take advantage of case's first-match behaviour.
++    ///*)
++      # Unusual form of absolute path, do nothing.
++    ;;
++    //*)
++      # Not necessarily an ordinary path; POSIX reserves leading '//'
++      # and for example Cygwin uses it to access remote file shares
++      # over CIFS/SMB, so we conserve a leading double slash if found.
++      func_normal_abspath_altnamespace=/
++    ;;
++    /*)
++      # Absolute path, do nothing.
++    ;;
++    *)
++      # Relative path, prepend $cwd.
++      func_normal_abspath_tpath=`pwd`/$func_normal_abspath_tpath
++    ;;
++  esac
++  # Cancel out all the simple stuff to save iterations.  We also want
++  # the path to end with a slash for ease of parsing, so make sure
++  # there is one (and only one) here.
++  func_normal_abspath_tpath=`$ECHO "$func_normal_abspath_tpath" | $SED \
++        -e "$removedotparts" -e "$collapseslashes" -e "$finalslash"`
++  while :; do
++    # Processed it all yet?
++    if test "$func_normal_abspath_tpath" = / ; then
++      # If we ascended to the root using ".." the result may be empty now.
++      if test -z "$func_normal_abspath_result" ; then
++        func_normal_abspath_result=/
++      fi
++      break
++    fi
++    func_normal_abspath_tcomponent=`$ECHO "$func_normal_abspath_tpath" | $SED \
++        -e "$pathcar"`
++    func_normal_abspath_tpath=`$ECHO "$func_normal_abspath_tpath" | $SED \
++        -e "$pathcdr"`
++    # Figure out what to do with it
++    case $func_normal_abspath_tcomponent in
++      "")
++        # Trailing empty path component, ignore it.
++      ;;
++      ..)
++        # Parent dir; strip last assembled component from result.
++        func_dirname "$func_normal_abspath_result"
++        func_normal_abspath_result=$func_dirname_result
++      ;;
++      *)
++        # Actual path component, append it.
++        func_normal_abspath_result=$func_normal_abspath_result/$func_normal_abspath_tcomponent
++      ;;
++    esac
++  done
++  # Restore leading double-slash if one was found on entry.
++  func_normal_abspath_result=$func_normal_abspath_altnamespace$func_normal_abspath_result
++}
+diff --git a/brush-core/src/compat/libtool-2.4-normal-abspath-fixed.sh b/brush-core/src/compat/libtool-2.4-normal-abspath-fixed.sh
+new file mode 100644
+index 00000000..d8968130
+--- /dev/null
++++ b/brush-core/src/compat/libtool-2.4-normal-abspath-fixed.sh
+@@ -0,0 +1,95 @@
++func_normal_abspath ()
++{
++    $debug_cmd
++
++    # These SED scripts presuppose an absolute path with a trailing slash.
++    _G_pathcar='s|^/\([^/]*\).*$|\1|'
++    _G_pathcdr='s|^/[^/]*||'
++    _G_removedotparts=':dotsl
++		s|/\./|/|g
++		t dotsl
++		s|/\.$|/|'
++    _G_collapseslashes='s|/\{1,\}|/|g'
++    _G_finalslash='s|/*$|/|'
++
++    # Start from root dir and reassemble the path.
++    func_normal_abspath_result=
++    func_normal_abspath_tpath=$1
++    func_normal_abspath_altnamespace=
++    case $func_normal_abspath_tpath in
++      "")
++        # Empty path, that just means $cwd.
++        func_stripname '' '/' "`pwd`"
++        func_normal_abspath_result=$func_stripname_result
++        return
++        ;;
++      # The next three entries are used to spot a run of precisely
++      # two leading slashes without using negated character classes;
++      # we take advantage of case's first-match behaviour.
++      ///*)
++        # Unusual form of absolute path, do nothing.
++        ;;
++      //*)
++        # Not necessarily an ordinary path; POSIX reserves leading '//'
++        # and for example Cygwin uses it to access remote file shares
++        # over CIFS/SMB, so we conserve a leading double slash if found.
++        func_normal_abspath_altnamespace=/
++        ;;
++      /*)
++        # Absolute path, do nothing.
++        ;;
++      [a-zA-Z]:/*)
++        # Absolute path with a drive letter, as a native Windows shell spells it.
++        ;;
++      *)
++        # Relative path, prepend $cwd.
++        func_normal_abspath_tpath=`pwd`/$func_normal_abspath_tpath
++        ;;
++    esac
++    # The loop below consumes the path one leading "/component" at a time, so a
++    # drive letter (possibly from `pwd` above) would never be consumed.  Set it
++    # aside like a leading double slash.
++    case $func_normal_abspath_tpath in
++      [a-zA-Z]:/*)
++        func_normal_abspath_altnamespace=`$ECHO "$func_normal_abspath_tpath" | $SED 's|^\(..\).*|\1|'`
++        func_normal_abspath_tpath=`$ECHO "$func_normal_abspath_tpath" | $SED 's|^..||'`
++        ;;
++    esac
++
++    # Cancel out all the simple stuff to save iterations.  We also want
++    # the path to end with a slash for ease of parsing, so make sure
++    # there is one (and only one) here.
++    func_normal_abspath_tpath=`$ECHO "$func_normal_abspath_tpath" | $SED \
++          -e "$_G_removedotparts" -e "$_G_collapseslashes" -e "$_G_finalslash"`
++    while :; do
++      # Processed it all yet?
++      if test / = "$func_normal_abspath_tpath"; then
++        # If we ascended to the root using ".." the result may be empty now.
++        if test -z "$func_normal_abspath_result"; then
++          func_normal_abspath_result=/
++        fi
++        break
++      fi
++      func_normal_abspath_tcomponent=`$ECHO "$func_normal_abspath_tpath" | $SED \
++          -e "$_G_pathcar"`
++      func_normal_abspath_tpath=`$ECHO "$func_normal_abspath_tpath" | $SED \
++          -e "$_G_pathcdr"`
++      # Figure out what to do with it
++      case $func_normal_abspath_tcomponent in
++        "")
++          # Trailing empty path component, ignore it.
++          ;;
++        ..)
++          # Parent dir; strip last assembled component from result.
++          func_dirname "$func_normal_abspath_result"
++          func_normal_abspath_result=$func_dirname_result
++          ;;
++        *)
++          # Actual path component, append it.
++          func_append func_normal_abspath_result "/$func_normal_abspath_tcomponent"
++          ;;
++      esac
++    done
++    # Restore leading double-slash if one was found on entry.
++    func_normal_abspath_result=$func_normal_abspath_altnamespace$func_normal_abspath_result
++}
+diff --git a/brush-core/src/compat/libtool-2.4-normal-abspath.sh b/brush-core/src/compat/libtool-2.4-normal-abspath.sh
+new file mode 100644
+index 00000000..c9b90e43
+--- /dev/null
++++ b/brush-core/src/compat/libtool-2.4-normal-abspath.sh
+@@ -0,0 +1,83 @@
++func_normal_abspath ()
++{
++    $debug_cmd
++
++    # These SED scripts presuppose an absolute path with a trailing slash.
++    _G_pathcar='s|^/\([^/]*\).*$|\1|'
++    _G_pathcdr='s|^/[^/]*||'
++    _G_removedotparts=':dotsl
++		s|/\./|/|g
++		t dotsl
++		s|/\.$|/|'
++    _G_collapseslashes='s|/\{1,\}|/|g'
++    _G_finalslash='s|/*$|/|'
++
++    # Start from root dir and reassemble the path.
++    func_normal_abspath_result=
++    func_normal_abspath_tpath=$1
++    func_normal_abspath_altnamespace=
++    case $func_normal_abspath_tpath in
++      "")
++        # Empty path, that just means $cwd.
++        func_stripname '' '/' "`pwd`"
++        func_normal_abspath_result=$func_stripname_result
++        return
++        ;;
++      # The next three entries are used to spot a run of precisely
++      # two leading slashes without using negated character classes;
++      # we take advantage of case's first-match behaviour.
++      ///*)
++        # Unusual form of absolute path, do nothing.
++        ;;
++      //*)
++        # Not necessarily an ordinary path; POSIX reserves leading '//'
++        # and for example Cygwin uses it to access remote file shares
++        # over CIFS/SMB, so we conserve a leading double slash if found.
++        func_normal_abspath_altnamespace=/
++        ;;
++      /*)
++        # Absolute path, do nothing.
++        ;;
++      *)
++        # Relative path, prepend $cwd.
++        func_normal_abspath_tpath=`pwd`/$func_normal_abspath_tpath
++        ;;
++    esac
++
++    # Cancel out all the simple stuff to save iterations.  We also want
++    # the path to end with a slash for ease of parsing, so make sure
++    # there is one (and only one) here.
++    func_normal_abspath_tpath=`$ECHO "$func_normal_abspath_tpath" | $SED \
++          -e "$_G_removedotparts" -e "$_G_collapseslashes" -e "$_G_finalslash"`
++    while :; do
++      # Processed it all yet?
++      if test / = "$func_normal_abspath_tpath"; then
++        # If we ascended to the root using ".." the result may be empty now.
++        if test -z "$func_normal_abspath_result"; then
++          func_normal_abspath_result=/
++        fi
++        break
++      fi
++      func_normal_abspath_tcomponent=`$ECHO "$func_normal_abspath_tpath" | $SED \
++          -e "$_G_pathcar"`
++      func_normal_abspath_tpath=`$ECHO "$func_normal_abspath_tpath" | $SED \
++          -e "$_G_pathcdr"`
++      # Figure out what to do with it
++      case $func_normal_abspath_tcomponent in
++        "")
++          # Trailing empty path component, ignore it.
++          ;;
++        ..)
++          # Parent dir; strip last assembled component from result.
++          func_dirname "$func_normal_abspath_result"
++          func_normal_abspath_result=$func_dirname_result
++          ;;
++        *)
++          # Actual path component, append it.
++          func_append func_normal_abspath_result "/$func_normal_abspath_tcomponent"
++          ;;
++      esac
++    done
++    # Restore leading double-slash if one was found on entry.
++    func_normal_abspath_result=$func_normal_abspath_altnamespace$func_normal_abspath_result
++}
+diff --git a/brush-core/src/interp.rs b/brush-core/src/interp.rs
+index 6875a0ad..fd7af4c4 100644
+--- a/brush-core/src/interp.rs
++++ b/brush-core/src/interp.rs
+@@ -893,6 +893,11 @@ impl Execute for ast::CaseClauseCommand {
+         shell: &mut Shell<impl extensions::ShellExtensions>,
+         params: &ExecutionParameters,
+     ) -> Result<ExecutionResult, error::Error> {
++        #[cfg(windows)]
++        if let Some(fixed) = crate::compat::case_replacement(self) {
++            return fixed.execute(shell, params).await;
++        }
++
+         // N.B. One would think it makes sense to trace the expanded value being switched
+         // on, but that's not it.
+         if shell.options().print_commands_and_arguments {
+@@ -1132,8 +1137,15 @@ impl Execute for ast::FunctionDefinition {
+     async fn execute(
+         &self,
+         shell: &mut Shell<impl extensions::ShellExtensions>,
+-        _params: &ExecutionParameters,
++        params: &ExecutionParameters,
+     ) -> Result<ExecutionResult, error::Error> {
++        #[cfg(windows)]
++        if let Some(fixed) = crate::compat::function_replacement(self) {
++            return fixed.execute(shell, params).await;
++        }
++        #[cfg(not(windows))]
++        let _ = params;
++
+         let func_name = self.fname.value.clone();
+ 
+         // In POSIX mode, function names can't shadow special builtins.
+diff --git a/brush-core/src/lib.rs b/brush-core/src/lib.rs
+index 8f1b30cc..04e5add3 100644
+--- a/brush-core/src/lib.rs
++++ b/brush-core/src/lib.rs
+@@ -6,6 +6,8 @@ mod braceexpansion;
+ pub mod builtins;
+ pub mod callstack;
+ pub mod commands;
++#[cfg(windows)]
++mod compat;
+ pub mod completion;
+ pub mod env;
+ pub mod error;
+diff --git a/brush-core/tests/windows_compat_tests.rs b/brush-core/tests/windows_compat_tests.rs
+new file mode 100644
+index 00000000..df2b026d
+--- /dev/null
++++ b/brush-core/tests/windows_compat_tests.rs
+@@ -0,0 +1,104 @@
++//! Integration tests for the shims that replace known-faulty code from generated
++//! build scripts with code that handles drive-letter paths.
++
++#![cfg(windows)]
++#![cfg(test)]
++#![allow(clippy::panic_in_result_fn, clippy::expect_used)]
++
++use anyhow::Result;
++
++async fn run(shell: &mut brush_core::Shell, script: &str) -> Result<()> {
++    let params = shell.default_exec_params();
++    shell
++        .run_string(script, &brush_core::SourceInfo::default(), &params)
++        .await?;
++    Ok(())
++}
++
++async fn defined_as(faulty: &str, expected: &str) -> Result<()> {
++    let mut shell = brush_core::Shell::builder().build().await?;
++    run(&mut shell, faulty).await?;
++    let defined = shell
++        .funcs()
++        .get("func_normal_abspath")
++        .expect("function not defined")
++        .definition()
++        .to_string();
++
++    let mut reference = brush_core::Shell::builder().build().await?;
++    run(&mut reference, expected).await?;
++    let expected = reference
++        .funcs()
++        .get("func_normal_abspath")
++        .expect("function not defined")
++        .definition()
++        .to_string();
++
++    assert_eq!(defined, expected);
++    Ok(())
++}
++
++/// libtool 2.2's `func_normal_abspath` never terminates on C:/ paths.
++#[tokio::test]
++async fn libtool_2_2_normal_abspath_is_replaced() -> Result<()> {
++    defined_as(
++        include_str!("../src/compat/libtool-2.2-normal-abspath.sh"),
++        include_str!("../src/compat/libtool-2.2-normal-abspath-fixed.sh"),
++    )
++    .await
++}
++
++/// libtool 2.4 to 2.6 have the same bug in a rewritten `func_normal_abspath`.
++#[tokio::test]
++async fn libtool_2_4_normal_abspath_is_replaced() -> Result<()> {
++    defined_as(
++        include_str!("../src/compat/libtool-2.4-normal-abspath.sh"),
++        include_str!("../src/compat/libtool-2.4-normal-abspath-fixed.sh"),
++    )
++    .await
++}
++
++/// A function that merely shares the name keeps its own body.
++#[tokio::test]
++async fn other_normal_abspath_is_kept() -> Result<()> {
++    let own = "func_normal_abspath () { func_normal_abspath_result=$1; }\n";
++    defined_as(own, own).await
++}
++
++/// gettext's `AM_PO_SUBDIRS` takes only /... for an absolute srcdir.
++#[tokio::test]
++async fn gettext_po_srcdir_accepts_drive_letter() -> Result<()> {
++    let mut shell = brush_core::Shell::builder().build().await?;
++    run(
++        &mut shell,
++        &format!(
++            "ac_given_srcdir=C:/src/binutils-gdb/bfd ac_dots=../\n{}",
++            include_str!("../src/compat/gettext-po-srcdir.sh")
++        ),
++    )
++    .await?;
++    assert_eq!(
++        shell.env_str("top_srcdir").as_deref(),
++        Some("C:/src/binutils-gdb/bfd")
++    );
++    Ok(())
++}
++
++/// The relative srcdir case is unchanged.
++#[tokio::test]
++async fn gettext_po_srcdir_relative() -> Result<()> {
++    let mut shell = brush_core::Shell::builder().build().await?;
++    run(
++        &mut shell,
++        &format!(
++            "ac_given_srcdir=../../src/bfd ac_dots=../\n{}",
++            include_str!("../src/compat/gettext-po-srcdir.sh")
++        ),
++    )
++    .await?;
++    assert_eq!(
++        shell.env_str("top_srcdir").as_deref(),
++        Some("../../../src/bfd")
++    );
++    Ok(())
++}

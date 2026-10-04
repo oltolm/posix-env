@@ -1,0 +1,59 @@
+context:
+  version: "4.4.1"
+
+package:
+  name: make
+  version: ${{ version }}
+
+source:
+  url: https://ftpmirror.gnu.org/gnu/make/make-${{ version }}.tar.gz
+  sha256: dd16fb1d67bfab79a72f5e8390735c49e3e8e70b4945a15ab1f81ddb78658fb3
+  # From MSYS2's mingw-w64-make, which also renames the program to
+  # mingw32-make; this package keeps the name make.
+  patches:
+    # setlocale interferes with line buffering in parallel make on MinGW.
+    - make-linebuf-mingw.patch
+    - 005-fix-default-cxx.patch
+    - 006-fix-build-with-gcc-15.patch
+    - 007-fix-w32-printf-modifier.patch
+    # https://lists.gnu.org/archive/html/bug-make/2022-11/msg00017.html
+    - make-4.4-timestamps.patch
+    # Symlink targets looked out of date as soon as their source changed.
+    - 008-follow-symlinks-in-name_mtime.patch
+    # Message catalogs follow the installation.
+    - 009-relocate-localedir.patch
+
+build:
+  number: 4
+  script:
+    interpreter: brush
+    content:
+      - >-
+        ./configure --prefix="$PREFIX" --disable-rpath
+        --with-libintl-prefix="$PREFIX" --with-libiconv-prefix="$PREFIX"
+        CPPFLAGS=-DMAKE_LOAD CFLAGS="-O2 -mthreads" ac_cv_dos_paths=yes
+      - make -j"$(nproc)"
+      - make install
+
+requirements:
+  build:
+    - posix-env
+  host:
+    - gettext-runtime
+    - libiconv
+
+tests:
+  - script:
+      interpreter: cmd
+      content:
+        - make --version
+        - 'make -f NUL --eval="all: ; @echo built" all | findstr /b built || exit /b 1'
+        # Translations are found: German messages.
+        - set LC_ALL=de_DE
+        - make -f NUL nosuchtarget 2>&1 | findstr /c:"Keine Regel" || exit /b 1
+
+about:
+  homepage: https://www.gnu.org/software/make/
+  license: GPL-3.0-or-later
+  license_file: COPYING
+  summary: GNU make

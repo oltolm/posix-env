@@ -1,0 +1,73 @@
+From 76cfa62200c7d360ddb64a46959494ca3e5eba7a Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Fri, 2 Oct 2026 21:09:33 +0200
+Subject: [PATCH 18/21] fix(windows): resolve a relative program path against
+ the shell's directory
+
+On Windows, `std::process::Command` resolves a relative program path
+against the parent process's working directory, not the `current_dir`
+given to the child.  `cd` changes only the shell's directory, so after it
+`./prog` failed with "command not found".
+
+Make such a path absolute against the shell's directory before spawning.
+A `#!` script still gets the path as written, so `$0` is unchanged;
+configure derives srcdir from it.
+
+Assisted-by: Claude Code:claude-opus-5-5
+---
+ brush-core/src/commands.rs                    | 13 +++++++++++-
+ .../tests/cases/brush/command_path.yaml       | 21 +++++++++++++++++++
+ 2 files changed, 33 insertions(+), 1 deletion(-)
+ create mode 100644 brush-shell/tests/cases/brush/command_path.yaml
+
+diff --git a/brush-core/src/commands.rs b/brush-core/src/commands.rs
+index ca01695a..7a1f81e7 100644
+--- a/brush-core/src/commands.rs
++++ b/brush-core/src/commands.rs
+@@ -196,7 +196,18 @@ pub fn compose_std_command<S: AsRef<OsStr>, SE: extensions::ShellExtensions>(
+         cmd.args(interp_arg);
+         cmd.arg(command_name);
+     } else {
+-        cmd = std::process::Command::new(command_name);
++        // Windows resolves a relative program path against our process's working directory,
++        // not the child's; `cd` changes only the shell's.
++        #[cfg(windows)]
++        if crate::sys::fs::contains_path_separator(command_name) {
++            cmd = std::process::Command::new(context.shell.absolute_path(command_name));
++        } else {
++            cmd = std::process::Command::new(command_name);
++        }
++        #[cfg(not(windows))]
++        {
++            cmd = std::process::Command::new(command_name);
++        }
+     }
+ 
+     // Override argv[0].
+diff --git a/brush-shell/tests/cases/brush/command_path.yaml b/brush-shell/tests/cases/brush/command_path.yaml
+new file mode 100644
+index 00000000..68484554
+--- /dev/null
++++ b/brush-shell/tests/cases/brush/command_path.yaml
+@@ -0,0 +1,21 @@
++name: "lookup of external commands"
++cases:
++  # Windows resolves a relative program path against the parent's working
++  # directory, which `cd` does not change.
++  - name: "a relative command path is resolved against the shell's directory"
++    stdin: |
++      cd "${BASH%[/\\]*}"
++      ./"${BASH##*[/\\]}" -c 'echo ran'
++    expected_stdout: |
++      ran
++
++  # A script run by a relative path sees $0 as written; configure derives
++  # srcdir from it.
++  - name: "a script run by a relative path gets that path as $0"
++    stdin: |
++      printf '#!%s\necho "$0"\n' "$BASH" > script
++      chmod +x script 2>/dev/null
++      PATH="${BASH%[/\\]*}"
++      ./script
++    expected_stdout: |
++      ./script

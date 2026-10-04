@@ -1,0 +1,59 @@
+Find the message catalogs below where m4.exe is installed.
+
+LOCALEDIR is compiled in from the build prefix; conda does not relocate
+paths inside binaries on Windows.
+
+diff --git a/src/m4.c b/src/m4.c
+index 87b2410..510e222 100644
+--- a/src/m4.c
++++ b/src/m4.c
+@@ -402,6 +402,37 @@ process_file (const char *name)
+ # define OPTSTRING "-B:D:EF:GH:I:L:N:PQR:S:T:U:d::egil:o:st:"
+ #endif
+ 
++#ifdef _WIN32
++# define WIN32_LEAN_AND_MEAN
++# include <windows.h>
++
++/* The message catalogs below where m4.exe is installed: m4.exe is in
++   PREFIX/bin, the catalogs in PREFIX/share/locale.  LOCALEDIR names the
++   prefix m4 was built for, which a relocated installation does not have;
++   without that layout it stays.  */
++static const char *
++w32_localedir (void)
++{
++  static char dir[MAX_PATH + sizeof "/share/locale"];
++  char *p;
++  DWORD n = GetModuleFileNameA (NULL, dir, MAX_PATH);
++
++  if (n == 0 || n >= MAX_PATH)
++    return LOCALEDIR;
++  for (p = dir; *p; p++)
++    if (*p == '\\')
++      *p = '/';
++  /* Strip "/m4.exe", then "/bin".  */
++  if ((p = strrchr (dir, '/')) == NULL)
++    return LOCALEDIR;
++  *p = '\0';
++  if ((p = strrchr (dir, '/')) == NULL || _stricmp (p, "/bin") != 0)
++    return LOCALEDIR;
++  strcpy (p, "/share/locale");
++  return dir;
++}
++#endif
++
+ int
+ main (int argc, char *const *argv)
+ {
+@@ -426,7 +457,11 @@ main (int argc, char *const *argv)
+      format builtin; easiest is to override the user's choice of
+      LC_NUMERIC. */
+   setlocale (LC_NUMERIC, "C");
++#ifdef _WIN32
++  bindtextdomain (PACKAGE, w32_localedir ());
++#else
+   bindtextdomain (PACKAGE, LOCALEDIR);
++#endif
+   textdomain (PACKAGE);
+   atexit (close_stdin);
+ 

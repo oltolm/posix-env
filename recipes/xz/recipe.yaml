@@ -1,0 +1,55 @@
+context:
+  version: "5.8.4"
+
+package:
+  name: xz
+  version: ${{ version }}
+
+source:
+  url: https://github.com/tukaani-project/xz/releases/download/v${{ version }}/xz-${{ version }}.tar.xz
+  sha256: 4ce24038fd4221e0d13bc1a2de7a4db56e90b92b3bf75321f6c14be73f65de4b
+
+build:
+  number: 6
+  script:
+    interpreter: brush
+    file: build.sh
+
+requirements:
+  run_exports:
+    - ${{ pin_subpackage('xz', upper_bound='x') }}
+  build:
+    - posix-env
+  host:
+    - gettext-runtime
+    - libiconv
+    - scriptexe
+
+tests:
+  - requirements:
+      run:
+        - posix-env
+    script:
+      interpreter: cmd
+      content:
+        - xz --version
+        - echo hello> t
+        - xz -k t || exit /b 1
+        - xzcat t.xz | findstr /b hello || exit /b 1
+        - xzegrep -c "hel+o" t.xz | findstr /b 1 || exit /b 1
+  - package_contents:
+      files:
+        - bin/liblzma-5.dll
+        - lib/liblzma.dll.a
+        - lib/pkgconfig/liblzma.pc
+        - include/lzma.h
+
+about:
+  homepage: https://tukaani.org/xz/
+  license: 0BSD AND LGPL-2.1-or-later AND GPL-2.0-or-later
+  license_file:
+    - COPYING
+    - COPYING.0BSD
+    - COPYING.GPLv2
+    - COPYING.LGPLv2.1
+  summary: XZ and LZMA compression library and tools

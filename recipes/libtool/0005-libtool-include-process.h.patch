@@ -1,0 +1,15 @@
+0005-libtool-include-process.h.patch
+From MSYS2's mingw-w64-libtool.
+
+diff --git a/build-aux/ltmain.in b/build-aux/ltmain.in
+index 26ff497..ab175a2 100644
+--- a/build-aux/ltmain.in
++++ b/build-aux/ltmain.in
+@@ -3866,6 +3866,7 @@ EOF
+ # include <unistd.h>
+ # include <stdint.h>
+ # ifdef __CYGWIN__
++#  include <process.h>
+ #  include <io.h>
+ # endif
+ #endif

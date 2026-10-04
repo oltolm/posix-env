@@ -1,0 +1,86 @@
+From ade256f5abd48759832db75bd3ba160eb11b592c Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Fri, 2 Oct 2026 00:27:00 +0200
+Subject: [PATCH 14/21] fix: run function calls in pipelines concurrently
+
+A function call that is not the last pipeline stage was awaited to
+completion before the next stage started, so nothing read its pipe.
+Once its output exceeded the pipe buffer it blocked forever.  On Windows
+the buffer is 4 KiB, and autoconf's `ac_cache_dump | sed ... >>confcache`
+hung at the end of configure.
+
+The earlier fix for compound stages matched `ast::Command::Function`,
+which is a function definition; a call is a simple command.  Run the
+function as a task when it executes in a pipeline subshell, as builtins
+already are.
+
+Assisted-by: Claude Code:claude-opus-5-5
+---
+ brush-core/src/commands.rs                   | 31 +++++++++++++++++++-
+ brush-shell/tests/cases/compat/pipeline.yaml |  7 +++++
+ 2 files changed, 37 insertions(+), 1 deletion(-)
+
+diff --git a/brush-core/src/commands.rs b/brush-core/src/commands.rs
+index 6eb12984..ca01695a 100644
+--- a/brush-core/src/commands.rs
++++ b/brush-core/src/commands.rs
+@@ -20,7 +20,7 @@ use crate::{
+     interp::{self, Execute, ProcessGroupPolicy},
+     openfiles::{self, OpenFile, OpenFiles},
+     pathsearch, processes,
+-    results::ExecutionSpawnResult,
++    results::{ExecutionSpawnResult, ExecutionWaitResult},
+     sys, trace_categories, traps, variables,
+ };
+ 
+@@ -529,6 +529,35 @@ impl<'a, SE: extensions::ShellExtensions> SimpleCommand<'a, SE> {
+         self,
+         func_registration: functions::Registration,
+     ) -> Result<ExecutionSpawnResult, error::Error> {
++        // A function runs inside this process. As a pipeline stage it must not be
++        // awaited before the next stage starts, or it blocks forever once its output
++        // exceeds the pipe buffer; run it as a task, as builtins are.
++        if let ShellForCommand::OwnedShell { target, .. } = self.shell {
++            let mut shell = *target;
++            let join_handle = tokio::spawn(async move {
++                let last_arg = Self::take_last_arg(&self.args);
++                let cmd_context = ExecutionContext {
++                    shell: &mut shell,
++                    command_name: self.command_name,
++                    params: self.params,
++                };
++                let result =
++                    invoke_shell_function(func_registration, cmd_context, &self.args[1..]).await;
++                shell.update_last_arg_variable(last_arg);
++                if let Some(post_execute) = self.post_execute {
++                    let _ = post_execute(&mut shell);
++                }
++                match result? {
++                    ExecutionSpawnResult::Completed(result) => Ok(result),
++                    spawned => match spawned.wait().await? {
++                        ExecutionWaitResult::Completed(result) => Ok(result),
++                        ExecutionWaitResult::Stopped(..) => Ok(ExecutionResult::stopped()),
++                    },
++                }
++            });
++            return Ok(ExecutionSpawnResult::StartedTask(join_handle));
++        }
++
+         let mut shell = self.shell;
+         let last_arg = Self::take_last_arg(&self.args);
+ 
+diff --git a/brush-shell/tests/cases/compat/pipeline.yaml b/brush-shell/tests/cases/compat/pipeline.yaml
+index 22a74652..5a256b1c 100644
+--- a/brush-shell/tests/cases/compat/pipeline.yaml
++++ b/brush-shell/tests/cases/compat/pipeline.yaml
+@@ -66,3 +66,10 @@ cases:
+     stdin: |
+       { i=0; while [ $i -lt 20000 ]; do echo "line $i"; i=$((i + 1)); done; } |
+         { n=0; while read -r l; do n=$((n + 1)); done; echo "$n"; }
++
++  # Same, with a function call as the first stage.
++  - name: "Function call pipeline stage writing more than a pipe buffer"
++    timeout_in_seconds: 60
++    stdin: |
++      lines() { i=0; while [ $i -lt 20000 ]; do echo "line $i"; i=$((i + 1)); done; }
++      lines | { n=0; while read -r l; do n=$((n + 1)); done; echo "$n"; }

@@ -1,0 +1,93 @@
+From d487b892bf94842bbd310e1cdcf7dbed75991dea Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Sun, 4 Oct 2026 14:45:07 +0200
+Subject: [PATCH] fix: keep command substitution output that is not UTF-8
+
+The output was read with read_to_string, so a single byte that is not
+UTF-8 failed the whole substitution with "stream did not contain valid
+UTF-8" and expanded to nothing.  On Windows, programs write text in the
+ANSI code page: libtool's extract-trace runs "m4 --version", whose
+output has the author's name in it, found no usable m4 and stopped the
+build.
+
+Read the bytes and convert them lossily, as the shell's other expansions
+already do.  Bash keeps the bytes themselves; a String cannot.
+
+Assisted-by: Claude Code:claude-opus-5-5
+---
+ brush-core/src/sys/stubs/async_pipe.rs        | 10 +++++---
+ brush-core/src/sys/unix/async_pipe.rs         | 10 +++++---
+ .../tests/command_substitution_tests.rs       | 23 +++++++++++++++++++
+ 3 files changed, 37 insertions(+), 6 deletions(-)
+ create mode 100644 brush-core/tests/command_substitution_tests.rs
+
+diff --git a/brush-core/src/sys/stubs/async_pipe.rs b/brush-core/src/sys/stubs/async_pipe.rs
+index 6b6ca14c..083a4832 100644
+--- a/brush-core/src/sys/stubs/async_pipe.rs
++++ b/brush-core/src/sys/stubs/async_pipe.rs
+@@ -20,9 +20,13 @@ impl AsyncPipeReader {
+         };
+ 
+         tokio::task::spawn_blocking(move || {
+-            let mut s = String::new();
+-            { reader }.read_to_string(&mut s)?;
+-            Ok(s)
++            // Programs may write bytes that are not UTF-8, such as text in
++            // the ANSI code page; like the shell's other expansions, keep
++            // the output instead of failing the substitution.
++            let mut bytes = Vec::new();
++            { reader }.read_to_end(&mut bytes)?;
++            Ok(String::from_utf8(bytes)
++                .unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned()))
+         })
+         .await
+         .map_err(io::Error::other)?
+diff --git a/brush-core/src/sys/unix/async_pipe.rs b/brush-core/src/sys/unix/async_pipe.rs
+index f9511cf7..9290d3e1 100644
+--- a/brush-core/src/sys/unix/async_pipe.rs
++++ b/brush-core/src/sys/unix/async_pipe.rs
+@@ -16,8 +16,12 @@ impl AsyncPipeReader {
+ 
+     pub(crate) async fn read_to_string(&mut self) -> io::Result<String> {
+         use tokio::io::AsyncReadExt;
+-        let mut s = String::new();
+-        self.0.read_to_string(&mut s).await?;
+-        Ok(s)
++        // Programs may write bytes that are not UTF-8; like the shell's
++        // other expansions, keep the output instead of failing the
++        // substitution.
++        let mut bytes = Vec::new();
++        self.0.read_to_end(&mut bytes).await?;
++        Ok(String::from_utf8(bytes)
++            .unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned()))
+     }
+ }
+diff --git a/brush-core/tests/command_substitution_tests.rs b/brush-core/tests/command_substitution_tests.rs
+new file mode 100644
+index 00000000..8db98e30
+--- /dev/null
++++ b/brush-core/tests/command_substitution_tests.rs
+@@ -0,0 +1,23 @@
++//! Integration tests for command substitution output handling.
++
++#![cfg(test)]
++#![allow(clippy::panic_in_result_fn)]
++
++use anyhow::Result;
++
++/// Output that is not UTF-8, such as text in a Windows ANSI code page, is
++/// kept rather than failing the substitution.
++#[tokio::test]
++async fn non_utf8_output_is_kept() -> Result<()> {
++    let mut shell = brush_core::Shell::builder().build().await?;
++    let params = shell.default_exec_params();
++    shell
++        .run_string(
++            r"x=$(printf 'Ren\351 Seindal')",
++            &brush_core::SourceInfo::default(),
++            &params,
++        )
++        .await?;
++    assert_eq!(shell.env_str("x").as_deref(), Some("Ren\u{FFFD} Seindal"));
++    Ok(())
++}

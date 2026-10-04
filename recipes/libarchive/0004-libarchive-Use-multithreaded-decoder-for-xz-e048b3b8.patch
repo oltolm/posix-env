@@ -1,0 +1,116 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Sun, 4 Oct 2026 17:15:47 +0200
+Subject: [PATCH 4/6] libarchive: Use multithreaded decoder for xz (e048b3b8)
+
+---
+ CMakeLists.txt                              |  4 ++++
+ build/cmake/config.h.in                     |  3 +++
+ configure.ac                                | 13 ++++++++++++
+ libarchive/archive_read_support_filter_xz.c | 23 +++++++++++++++++++--
+ 4 files changed, 41 insertions(+), 2 deletions(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 7cb9276..823a1da 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -580,6 +580,9 @@ IF(LIBLZMA_FOUND)
+   CHECK_C_SOURCE_COMPILES(
+     "#include <lzma.h>\n#if LZMA_VERSION < 50020000\n#error unsupported\n#endif\nint main(void){int ignored __attribute__((unused)); ignored = lzma_stream_encoder_mt(0, 0); return 0;}"
+     HAVE_LZMA_STREAM_ENCODER_MT)
++  CHECK_C_SOURCE_COMPILES(
++    "#include <lzma.h>\n#if LZMA_VERSION < 50040000\n#error unsupported\n#endif\nint main(void){lzma_ret ignored = lzma_stream_decoder_mt(0, 0); return ignored == LZMA_OK;}"
++    HAVE_LZMA_STREAM_DECODER_MT)
+   IF(NOT WITHOUT_LZMA_API_STATIC AND LZMA_API_STATIC)
+     ADD_DEFINITIONS(-DLZMA_API_STATIC)
+   ENDIF(NOT WITHOUT_LZMA_API_STATIC AND LZMA_API_STATIC)
+@@ -587,6 +590,7 @@ IF(LIBLZMA_FOUND)
+ ELSE(LIBLZMA_FOUND)
+ # LZMA not found and will not be used.
+   SET(HAVE_LZMA_STREAM_ENCODER_MT 0)
++  SET(HAVE_LZMA_STREAM_DECODER_MT 0)
+ ENDIF(LIBLZMA_FOUND)
+ MARK_AS_ADVANCED(CLEAR LIBLZMA_INCLUDE_DIR)
+ MARK_AS_ADVANCED(CLEAR LIBLZMA_LIBRARY)
+diff --git a/build/cmake/config.h.in b/build/cmake/config.h.in
+index 76864a9..06ad131 100644
+--- a/build/cmake/config.h.in
++++ b/build/cmake/config.h.in
+@@ -874,6 +874,9 @@ typedef uint64_t uintmax_t;
+ /* Define to 1 if you have a working `lzma_stream_encoder_mt' function. */
+ #cmakedefine HAVE_LZMA_STREAM_ENCODER_MT 1
+ 
++/* Define to 1 if you have the 'lzma_stream_decoder_mt' function. */
++#cmakedefine HAVE_LZMA_STREAM_DECODER_MT 1
++
+ /* Define to 1 if you have the <lzo/lzo1x.h> header file. */
+ #cmakedefine HAVE_LZO_LZO1X_H 1
+ 
+diff --git a/configure.ac b/configure.ac
+index a2a6d7c..788354d 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -534,6 +534,19 @@ if test "x$with_lzma" != "xno"; then
+   if test "x$ac_cv_lzma_has_mt" != xno; then
+ 	  AC_DEFINE([HAVE_LZMA_STREAM_ENCODER_MT], [1], [Define to 1 if you have the `lzma_stream_encoder_mt' function.])
+   fi
++  AC_CACHE_CHECK(
++    [whether we have multithreaded decoding support in lzma],
++    ac_cv_lzma_has_decoder_mt,
++    [AC_LINK_IFELSE([
++      AC_LANG_PROGRAM([[#include <lzma.h>]
++                       [#if LZMA_VERSION < 50040000]
++                       [#error unsupported]
++                       [#endif]],
++                      [[lzma_ret ignored = lzma_stream_decoder_mt(0, 0); return ignored == LZMA_OK;]])],
++      [ac_cv_lzma_has_decoder_mt=yes], [ac_cv_lzma_has_decoder_mt=no])])
++  if test "x$ac_cv_lzma_has_decoder_mt" != xno; then
++	  AC_DEFINE([HAVE_LZMA_STREAM_DECODER_MT], [1], [Define to 1 if you have the 'lzma_stream_decoder_mt' function.])
++  fi
+ fi
+ 
+ AC_ARG_WITH([lzo2],
+diff --git a/libarchive/archive_read_support_filter_xz.c b/libarchive/archive_read_support_filter_xz.c
+index 7c8e0cb..da24766 100644
+--- a/libarchive/archive_read_support_filter_xz.c
++++ b/libarchive/archive_read_support_filter_xz.c
+@@ -470,6 +470,10 @@ xz_lzma_bidder_init(struct archive_read_filter *f)
+ 	void *out_block;
+ 	struct xz *xz;
+ 	int ret;
++#ifdef HAVE_LZMA_STREAM_DECODER_MT
++	lzma_mt mt_options;
++	uint64_t physmem;
++#endif
+ 
+ 	xz = calloc(1, sizeof(*xz));
+ 	out_block = malloc(out_block_size);
+@@ -504,11 +508,26 @@ xz_lzma_bidder_init(struct archive_read_filter *f)
+ 		xz->in_stream = 1;
+ 
+ 	/* Initialize compression library. */
+-	if (f->code == ARCHIVE_FILTER_XZ)
++	if (f->code == ARCHIVE_FILTER_XZ) {
++#ifdef HAVE_LZMA_STREAM_DECODER_MT
++		memset(&mt_options, 0, sizeof(mt_options));
++		mt_options.flags = LZMA_CONCATENATED;
++		mt_options.threads = lzma_cputhreads();
++		if (mt_options.threads == 0)
++			mt_options.threads = 1;
++		physmem = lzma_physmem();
++		/* Keep parallel input and output buffering bounded. */
++		mt_options.memlimit_threading = physmem / 4;
++		if (mt_options.memlimit_threading == 0)
++			mt_options.memlimit_threading = 1;
++		mt_options.memlimit_stop = LZMA_MEMLIMIT;
++		ret = lzma_stream_decoder_mt(&(xz->stream), &mt_options);
++#else
+ 		ret = lzma_stream_decoder(&(xz->stream),
+ 		    LZMA_MEMLIMIT,/* memlimit */
+ 		    LZMA_CONCATENATED);
+-	else
++#endif
++	} else
+ 		ret = lzma_alone_decoder(&(xz->stream),
+ 		    LZMA_MEMLIMIT);/* memlimit */
+ 

@@ -1,0 +1,22 @@
+Win32 perl's exec does not wait for the program it starts.
+From the posix-env branch of MINGW-packages (mingw-w64-autoconf).
+
+diff --git a/bin/autoconf.in b/bin/autoconf.in
+index 8c11a2d..f28bb3b 100644
+--- a/bin/autoconf.in
++++ b/bin/autoconf.in
+@@ -196,6 +196,14 @@ print {*STDERR} $me,
+   "\n"
+   if $verbose;
+ 
++# Win32 perl's exec starts the program and exits without waiting for it:
++# the caller would continue before the output exists, with status 0.
++if ($^O eq 'MSWin32')
++  {
++    system {$autom4te_command[0]} @autom4te_command;
++    exit ($? == -1 ? 127 : $? >> 8);
++  }
++
+ exec {$autom4te_command[0]} @autom4te_command;
+ 
+ ### Setup "GNU" style for perl-mode and cperl-mode.

@@ -1,0 +1,48 @@
+context:
+  version: "0.2.0"
+
+package:
+  name: uutils-sed
+  version: ${{ version }}
+
+source:
+  url: https://github.com/uutils/sed/archive/refs/tags/${{ version }}.tar.gz
+  sha256: a5a03b3871b963420d1408b11415c90d4d69df02ab4f2f82826b42899a61a87a
+  # GNU sed behaviour that autoconf's config.status and libtool rely on.
+  patches:
+    - 0001-sed-end-the-replacement-at-an-delimiter.patch
+    - 0002-sed-drop-the-backslash-of-unknown-escapes-in-replace.patch
+    - 0003-sed-escape-bracket-expression-literals-that-are-spec.patch
+    - 0004-sed-continue-with-the-next-command-after-n.patch
+    - 0005-sed-treat-escaped-anchors-as-literals.patch
+    # Backport: "sed -i SCRIPT FILE" took SCRIPT as the backup suffix.
+    - 0006-sed-take-the-i-suffix-only-when-attached.patch
+
+build:
+  number: 1
+  script:
+    interpreter: brush
+    content:
+      - cargo build --release --locked
+      - mkdir -p "$PREFIX/bin"
+      - cp target/release/sed.exe "$PREFIX/bin/"
+
+requirements:
+  build:
+    - posix-env
+
+tests:
+  - script:
+      interpreter: cmd
+      content:
+        - sed --version
+        - echo abc | sed "s/b/X/" | findstr /b aXc || exit /b 1
+        - echo abc> t.txt
+        - sed -i "s/b/Y/" t.txt
+        - findstr /b aYc t.txt || exit /b 1
+
+about:
+  homepage: https://github.com/uutils/sed
+  license: MIT
+  license_file: LICENSE
+  summary: Rust rewrite of GNU sed

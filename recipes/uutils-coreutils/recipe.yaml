@@ -1,0 +1,39 @@
+context:
+  version: "0.12.0"
+
+package:
+  name: uutils-coreutils
+  version: ${{ version }}
+
+source:
+  url: https://github.com/uutils/coreutils/archive/${{ version }}/coreutils-${{ version }}.tar.gz
+  sha256: 4fb327655cb4ffcbf2f16550cf9234079ffe839692f7aa1a6eda104af684e122
+  patches:
+    # Relative symlink targets with '/' never resolve on Windows.
+    - 0001-ln-store-symlink-targets-with-backslashes-on-Windows.patch
+
+build:
+  number: 1
+  script:
+    interpreter: brush
+    file: build.sh
+
+requirements:
+  build:
+    - posix-env
+
+tests:
+  # The post-link script has run: the utilities exist under their own names.
+  - script:
+      interpreter: cmd
+      content:
+        - coreutils --version
+        - ls --version
+        - echo hello | tr h H | findstr /b Hello || exit /b 1
+        - if not exist "%PREFIX%\bin\[.exe" exit /b 1
+
+about:
+  homepage: https://github.com/uutils/coreutils
+  license: MIT
+  license_file: LICENSE
+  summary: Cross-platform Rust rewrite of the GNU coreutils, one multicall binary

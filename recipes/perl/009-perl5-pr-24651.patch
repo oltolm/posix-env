@@ -1,0 +1,318 @@
+Upstream pull request https://github.com/Perl/perl5/pull/24651, as MSYS2 applies it.
+
+diff --git a/dist/ExtUtils-ParseXS/Changes b/dist/ExtUtils-ParseXS/Changes
+index 602df93..dac997c 100644
+--- a/dist/ExtUtils-ParseXS/Changes
++++ b/dist/ExtUtils-ParseXS/Changes
+@@ -1,6 +1,9 @@
+ Revision history for Perl extension ExtUtils::ParseXS.
+ 
+-3.64
++3.65
++  - Mention module name in error message if XS handshake fails
++
++3.64 Sun Jul 26 2026
+   - Respect output arguments in INTERFACES
+   - PERL_UNUSED_VAR() the CV declared when an ALIAS or
+     XSINTERFACE_FUNC_SET has been seen.
+diff --git a/dist/ExtUtils-ParseXS/lib/ExtUtils/ParseXS.pm b/dist/ExtUtils-ParseXS/lib/ExtUtils/ParseXS.pm
+index 5e6e2cb..b741e4f 100644
+--- a/dist/ExtUtils-ParseXS/lib/ExtUtils/ParseXS.pm
++++ b/dist/ExtUtils-ParseXS/lib/ExtUtils/ParseXS.pm
+@@ -76,7 +76,7 @@ use Symbol;
+ 
+ our $VERSION;
+ BEGIN {
+-  $VERSION = '3.64';
++  $VERSION = '3.65';
+   require ExtUtils::ParseXS::Constants; ExtUtils::ParseXS::Constants->VERSION($VERSION);
+   require ExtUtils::ParseXS::CountLines; ExtUtils::ParseXS::CountLines->VERSION($VERSION);
+   require ExtUtils::ParseXS::Node; ExtUtils::ParseXS::Node->VERSION($VERSION);
+@@ -148,6 +148,8 @@ BEGIN {
+                         # but not yet processed.
+   'lastline_no',        # The line number of lastline.
+ 
++  'out_filename',       # The name of the output file.
++
+ 
+   # File-scoped configuration state:
+ 
+@@ -363,16 +365,18 @@ sub process_file {
+   chdir($self->{dir});
+   my $pwd = cwd();
+ 
+-  if ($self->{config_WantLineNumbers}) {
++  my $cfile;
++  if ( $Options{outfile} ) {
++    $cfile = $Options{outfile};
++  }
++  else {
+     my $csuffix = $Options{csuffix};
+-    my $cfile;
+-    if ( $Options{outfile} ) {
+-      $cfile = $Options{outfile};
+-    }
+-    else {
+-      $cfile = $Options{filename};
+-      $cfile =~ s/\.xs$/$csuffix/i or $cfile .= $csuffix;
+-    }
++    $cfile = $Options{filename};
++    $cfile =~ s/\.xs$/$csuffix/i or $cfile .= $csuffix;
++  }
++  $self->{out_filename} = $cfile;
++
++  if ($self->{config_WantLineNumbers}) {
+     tie(*PSEUDO_STDOUT, 'ExtUtils::ParseXS::CountLines', $cfile, $Options{output});
+     select PSEUDO_STDOUT;
+   }
+diff --git a/dist/ExtUtils-ParseXS/lib/ExtUtils/ParseXS/Constants.pm b/dist/ExtUtils-ParseXS/lib/ExtUtils/ParseXS/Constants.pm
+index 99294c3..8fc26dc 100644
+--- a/dist/ExtUtils-ParseXS/lib/ExtUtils/ParseXS/Constants.pm
++++ b/dist/ExtUtils-ParseXS/lib/ExtUtils/ParseXS/Constants.pm
+@@ -3,7 +3,7 @@ use strict;
+ use warnings;
+ use Symbol;
+ 
+-our $VERSION = '3.64';
++our $VERSION = '3.65';
+ 
+ =head1 NAME
+ 
+diff --git a/dist/ExtUtils-ParseXS/lib/ExtUtils/ParseXS/CountLines.pm b/dist/ExtUtils-ParseXS/lib/ExtUtils/ParseXS/CountLines.pm
+index 379697a..93b9e6f 100644
+--- a/dist/ExtUtils-ParseXS/lib/ExtUtils/ParseXS/CountLines.pm
++++ b/dist/ExtUtils-ParseXS/lib/ExtUtils/ParseXS/CountLines.pm
+@@ -13,15 +13,15 @@ package ExtUtils::ParseXS::CountLines;
+ 
+ use strict;
+ use warnings;
++use ExtUtils::ParseXS::Utilities ();
+ 
+-our $VERSION = '3.64';
++our $VERSION = '3.65';
+ 
+ our $SECTION_END_MARKER;
+ 
+ sub TIEHANDLE {
+   my ($class, $cfile, $fh) = @_;
+-  $cfile =~ s/\\/\\\\/g;
+-  $cfile =~ s/"/\\"/g;
++  $cfile = ExtUtils::ParseXS::Utilities::escape_file_for_line_directive $cfile;
+   $SECTION_END_MARKER = qq{#line --- "$cfile"};
+ 
+   return bless {
+@@ -64,4 +64,12 @@ sub end_marker {
+   return $SECTION_END_MARKER;
+ }
+ 
++sub file_marker {
++    shift;
++    my $file = shift;
++    my $marker = $SECTION_END_MARKER;
++    $marker =~ s|".*"| '"' . ExtUtils::ParseXS::Utilities::escape_file_for_line_directive($file) . '"' |e;
++    return $marker;
++}
++
+ 1;
+diff --git a/dist/ExtUtils-ParseXS/lib/ExtUtils/ParseXS/Eval.pm b/dist/ExtUtils-ParseXS/lib/ExtUtils/ParseXS/Eval.pm
+index 26b1c9b..e5824e1 100644
+--- a/dist/ExtUtils-ParseXS/lib/ExtUtils/ParseXS/Eval.pm
++++ b/dist/ExtUtils-ParseXS/lib/ExtUtils/ParseXS/Eval.pm
+@@ -2,7 +2,7 @@ package ExtUtils::ParseXS::Eval;
+ use strict;
+ use warnings;
+ 
+-our $VERSION = '3.64';
++our $VERSION = '3.65';
+ 
+ =head1 NAME
+ 
+diff --git a/dist/ExtUtils-ParseXS/lib/ExtUtils/ParseXS/Node.pm b/dist/ExtUtils-ParseXS/lib/ExtUtils/ParseXS/Node.pm
+index 9f9d8b5..3020a5f 100644
+--- a/dist/ExtUtils-ParseXS/lib/ExtUtils/ParseXS/Node.pm
++++ b/dist/ExtUtils-ParseXS/lib/ExtUtils/ParseXS/Node.pm
+@@ -3,7 +3,7 @@ use strict;
+ use warnings;
+ use Symbol;
+ 
+-our $VERSION = '3.64';
++our $VERSION = '3.65';
+ 
+ =head1 NAME
+ 
+@@ -1655,6 +1655,15 @@ sub as_code {
+ 
+     # Emit the boot_Foo__Bar() C function / XSUB
+ 
++    my $set_file = '';
++    my $reset_file = '';
++    if ($pxs->{config_WantLineNumbers}) {
++        (my $module = $pxs->{MODULE_cname}) =~ tr/_/:/;
++        my $fake_file = "$pxs->{out_filename} in $module";
++        $set_file = 'ExtUtils::ParseXS::CountLines'->file_marker($fake_file);
++        $reset_file = 'ExtUtils::ParseXS::CountLines'->end_marker;
++    }
++
+     print $self->Q(<<"EOF");
+         |#ifdef __cplusplus
+         |extern "C" $open_brace
+@@ -1665,7 +1674,9 @@ sub as_code {
+         |#if PERL_VERSION_LE(5, 21, 5)
+         |    dVAR; dXSARGS;
+         |#else
++        |$set_file
+         |    dVAR; ${\($pxs->{VERSIONCHECK_value} ? 'dXSBOOTARGSXSAPIVERCHK;' : 'dXSBOOTARGSAPIVERCHK;')}
++        |$reset_file
+         |#endif
+ EOF
+ 
+@@ -1704,10 +1715,12 @@ EOF
+     if ($pxs->{VERSIONCHECK_value}) {
+         print $self->Q(<<"EOF");
+         |#if PERL_VERSION_LE(5, 21, 5)
++        |$set_file
+         |    XS_VERSION_BOOTCHECK;
+         |#  ifdef XS_APIVERSION_BOOTCHECK
+         |    XS_APIVERSION_BOOTCHECK;
+         |#  endif
++        |$reset_file
+         |#endif
+         |
+ EOF
+@@ -1715,7 +1728,9 @@ EOF
+     else {
+         print $self->Q(<<"EOF") ;
+             |#if PERL_VERSION_LE(5, 21, 5) && defined(XS_APIVERSION_BOOTCHECK)
++            |$set_file
+             |  XS_APIVERSION_BOOTCHECK;
++            |$reset_file
+             |#endif
+             |
+ EOF
+diff --git a/dist/ExtUtils-ParseXS/lib/ExtUtils/ParseXS/Utilities.pm b/dist/ExtUtils-ParseXS/lib/ExtUtils/ParseXS/Utilities.pm
+index be46942..e67bb95 100644
+--- a/dist/ExtUtils-ParseXS/lib/ExtUtils/ParseXS/Utilities.pm
++++ b/dist/ExtUtils-ParseXS/lib/ExtUtils/ParseXS/Utilities.pm
+@@ -5,7 +5,7 @@ use Exporter;
+ use File::Spec;
+ use ExtUtils::ParseXS::Constants ();
+ 
+-our $VERSION = '3.64';
++our $VERSION = '3.65';
+ 
+ our (@ISA, @EXPORT_OK);
+ @ISA = qw(Exporter);
+diff --git a/dist/ExtUtils-ParseXS/lib/ExtUtils/Typemaps.pm b/dist/ExtUtils-ParseXS/lib/ExtUtils/Typemaps.pm
+index 31fd1dd..ce83a6f 100644
+--- a/dist/ExtUtils-ParseXS/lib/ExtUtils/Typemaps.pm
++++ b/dist/ExtUtils-ParseXS/lib/ExtUtils/Typemaps.pm
+@@ -2,7 +2,7 @@ package ExtUtils::Typemaps;
+ use 5.006001;
+ use strict;
+ use warnings;
+-our $VERSION = '3.64';
++our $VERSION = '3.65';
+ 
+ require ExtUtils::ParseXS;
+ require ExtUtils::ParseXS::Constants;
+diff --git a/dist/ExtUtils-ParseXS/lib/ExtUtils/Typemaps/Cmd.pm b/dist/ExtUtils-ParseXS/lib/ExtUtils/Typemaps/Cmd.pm
+index 8fa78e9..b192df5 100644
+--- a/dist/ExtUtils-ParseXS/lib/ExtUtils/Typemaps/Cmd.pm
++++ b/dist/ExtUtils-ParseXS/lib/ExtUtils/Typemaps/Cmd.pm
+@@ -2,7 +2,7 @@ package ExtUtils::Typemaps::Cmd;
+ use 5.006001;
+ use strict;
+ use warnings;
+-our $VERSION = '3.64';
++our $VERSION = '3.65';
+ 
+ use ExtUtils::Typemaps;
+ 
+diff --git a/dist/ExtUtils-ParseXS/lib/ExtUtils/Typemaps/InputMap.pm b/dist/ExtUtils-ParseXS/lib/ExtUtils/Typemaps/InputMap.pm
+index 24fe952..7def99b 100644
+--- a/dist/ExtUtils-ParseXS/lib/ExtUtils/Typemaps/InputMap.pm
++++ b/dist/ExtUtils-ParseXS/lib/ExtUtils/Typemaps/InputMap.pm
+@@ -2,7 +2,7 @@ package ExtUtils::Typemaps::InputMap;
+ use 5.006001;
+ use strict;
+ use warnings;
+-our $VERSION = '3.64';
++our $VERSION = '3.65';
+ 
+ =head1 NAME
+ 
+diff --git a/dist/ExtUtils-ParseXS/lib/ExtUtils/Typemaps/OutputMap.pm b/dist/ExtUtils-ParseXS/lib/ExtUtils/Typemaps/OutputMap.pm
+index 90f2340..0663f68 100644
+--- a/dist/ExtUtils-ParseXS/lib/ExtUtils/Typemaps/OutputMap.pm
++++ b/dist/ExtUtils-ParseXS/lib/ExtUtils/Typemaps/OutputMap.pm
+@@ -2,7 +2,7 @@ package ExtUtils::Typemaps::OutputMap;
+ use 5.006001;
+ use strict;
+ use warnings;
+-our $VERSION = '3.64';
++our $VERSION = '3.65';
+ 
+ =head1 NAME
+ 
+diff --git a/dist/ExtUtils-ParseXS/lib/ExtUtils/Typemaps/Type.pm b/dist/ExtUtils-ParseXS/lib/ExtUtils/Typemaps/Type.pm
+index 1aa2735..9b20771 100644
+--- a/dist/ExtUtils-ParseXS/lib/ExtUtils/Typemaps/Type.pm
++++ b/dist/ExtUtils-ParseXS/lib/ExtUtils/Typemaps/Type.pm
+@@ -4,7 +4,7 @@ use strict;
+ use warnings;
+ require ExtUtils::Typemaps;
+ 
+-our $VERSION = '3.64';
++our $VERSION = '3.65';
+ 
+ =head1 NAME
+ 
+diff --git a/dist/ExtUtils-ParseXS/lib/perlxs.pod b/dist/ExtUtils-ParseXS/lib/perlxs.pod
+index 642b4d5..6e767fe 100644
+--- a/dist/ExtUtils-ParseXS/lib/perlxs.pod
++++ b/dist/ExtUtils-ParseXS/lib/perlxs.pod
+@@ -5006,7 +5006,7 @@ this model, the less likely conflicts will occur.
+ 
+ =head1 XS VERSION
+ 
+-This document covers features supported by F<xsubpp> 3.64.
++This document covers features supported by F<xsubpp> 3.65.
+ 
+ =head1 AUTHOR DIAGNOSTICS
+ 
+diff --git a/dist/ExtUtils-ParseXS/t/003-parse-file-scope-keywords.t b/dist/ExtUtils-ParseXS/t/003-parse-file-scope-keywords.t
+index 285fb45..e786932 100644
+--- a/dist/ExtUtils-ParseXS/t/003-parse-file-scope-keywords.t
++++ b/dist/ExtUtils-ParseXS/t/003-parse-file-scope-keywords.t
+@@ -196,6 +196,31 @@ EOF
+     test_many($preamble, 'boot_Foo', \@test_fns);
+ }
+ 
++{
++    # Check for file/module name in boot code handshake.
++
++    my $preamble = Q(<<'EOF');
++EOF
++
++    my @test_fns = (
++        [
++            'file name in XS handshake',
++            Q(<<'EOF'),
++                |MODULE = Foo::Bar PACKAGE = Foo::Bar::Util
++                |
++                |PROTOTYPES:  DISABLE
++                |
++EOF
++
++            [  0, qr{^\s*#line \d+ \Q"(output) in Foo::Bar"\E}m,
++                "includes correct module name"
++            ],
++        ],
++
++    );
++
++    test_many($preamble, 'boot_Foo__Bar', \@test_fns);
++}
+ 
+ {
+     # Test reporting of bad syntax on MODULE lines.

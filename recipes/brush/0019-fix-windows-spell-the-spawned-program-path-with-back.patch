@@ -1,0 +1,75 @@
+From 773db766bbd2cb24db296e06b475379b64c15cfb Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Sat, 3 Oct 2026 17:54:20 +0200
+Subject: [PATCH 19/21] fix(windows): spell the spawned program path with
+ backslashes
+
+PATH entries are joined with `/`, so `cmd` resolves to
+`C:\WINDOWS\System32/cmd.exe`.  That path starts the child's command
+line, and cmd.exe scans its whole command line for switches: it read
+the `/cmd.exe` as `/c md.exe`, so `cmd /c echo hi` failed with "The
+system cannot find the path specified".  libtool's "whether to use cmd
+with one slash or two slashes" check then stopped configure with "Do
+not know how to convert paths".
+
+Convert `/` to `\` in the program path handed to CreateProcess.  The
+path the shell reports (`command -v`, `$_`) keeps its `/`.
+
+Assisted-by: Claude Code:claude-opus-5-5
+---
+ brush-core/src/commands.rs | 28 +++++++++++++++++++++++++++-
+ 1 file changed, 27 insertions(+), 1 deletion(-)
+
+diff --git a/brush-core/src/commands.rs b/brush-core/src/commands.rs
+index 7a1f81e7..359f1a05 100644
+--- a/brush-core/src/commands.rs
++++ b/brush-core/src/commands.rs
+@@ -157,6 +157,28 @@ impl<SE: extensions::ShellExtensions> std::ops::DerefMut for ShellForCommand<'_,
+     }
+ }
+ 
++/// Spells a program path with `\` separators for `CreateProcess`.
++///
++/// The shell joins PATH entries with `/` (see `join_command_path`), but the program
++/// path becomes the start of the child's command line, and some programs parse it:
++/// cmd.exe reads the `/cmd.exe` in `C:\WINDOWS\System32/cmd.exe` as a switch.
++#[cfg(windows)]
++fn windows_program_path(path: &std::path::Path) -> std::ffi::OsString {
++    use std::os::windows::ffi::{OsStrExt, OsStringExt};
++    let wide: Vec<u16> = path
++        .as_os_str()
++        .encode_wide()
++        .map(|c| {
++            if c == u16::from(b'/') {
++                u16::from(b'\\')
++            } else {
++                c
++            }
++        })
++        .collect();
++    std::ffi::OsString::from_wide(&wide)
++}
++
+ /// Composes a `std::process::Command` to execute the given command. Appropriately
+ /// configures the command name and arguments, redirections, injected file
+ /// descriptors, environment variables, etc.
+@@ -192,6 +214,8 @@ pub fn compose_std_command<S: AsRef<OsStr>, SE: extensions::ShellExtensions>(
+ 
+     let mut cmd;
+     if let Some((interp_path, interp_arg)) = interpreter {
++        #[cfg(windows)]
++        let interp_path = windows_program_path(&interp_path);
+         cmd = std::process::Command::new(interp_path);
+         cmd.args(interp_arg);
+         cmd.arg(command_name);
+@@ -200,7 +224,9 @@ pub fn compose_std_command<S: AsRef<OsStr>, SE: extensions::ShellExtensions>(
+         // not the child's; `cd` changes only the shell's.
+         #[cfg(windows)]
+         if crate::sys::fs::contains_path_separator(command_name) {
+-            cmd = std::process::Command::new(context.shell.absolute_path(command_name));
++            cmd = std::process::Command::new(windows_program_path(
++                &context.shell.absolute_path(command_name),
++            ));
+         } else {
+             cmd = std::process::Command::new(command_name);
+         }

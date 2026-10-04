@@ -1,0 +1,15 @@
+From MSYS2's mingw-w64-perl (009-fix-CCLIBDIR.patch).
+
+diff --git a/win32/GNUmakefile b/win32/GNUmakefile
+index 1a4ce8f..fe9015d 100644
+--- a/win32/GNUmakefile
++++ b/win32/GNUmakefile
+@@ -498,7 +498,7 @@ CCLIBDIR := $(CCHOME)\$(GCCCROSS)\lib
+ ARCHPREFIX := $(GCCCROSS)-
+ else ifeq ($(CCTYPE),GCC)
+ CCINCDIR := $(CCHOME)\include
+-CCLIBDIR := $(CCHOME)\lib;$(CCHOME)\$(GCCTARGET)\lib;$(CCHOME)\lib\gcc\$(GCCTARGET)\$(GCCVER)
++CCLIBDIR := $(CCHOME)\lib
+ ARCHPREFIX :=
+ else
+ CCINCDIR := $(CCHOME)\include

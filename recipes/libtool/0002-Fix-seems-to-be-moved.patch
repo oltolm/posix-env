@@ -1,0 +1,18 @@
+0002-Fix-seems-to-be-moved.patch
+From MSYS2's mingw-w64-libtool.
+
+diff --git a/build-aux/ltmain.in b/build-aux/ltmain.in
+index c9fea2f..ff7659a 100644
+--- a/build-aux/ltmain.in
++++ b/build-aux/ltmain.in
+@@ -7028,7 +7028,9 @@ func_mode_link ()
+ 		  eval libdir=`$SED -n -e 's/^libdir=\(.*\)$/\1/p' $deplib`
+ 		  test -z "$libdir" && \
+ 		    func_fatal_error "'$deplib' is not a valid libtool archive"
+-		  test "$absdir" != "$libdir" && \
++		  abs_inode=`ls -i "$deplib" | awk '{print $1}'`
++		    lib_inode=`ls -i "$libdir/$(basename $deplib)" | awk '{print $1}'`
++		  test "$abs_inode" != "$lib_inode" && \
+ 		    func_warning "'$deplib' seems to be moved"
+ 
+ 		  path=-L$absdir

@@ -1,0 +1,67 @@
+context:
+  version: "10.49"
+
+package:
+  name: pcre2
+  version: ${{ version }}
+
+source:
+  url: https://github.com/PCRE2Project/pcre2/releases/download/pcre2-${{ version }}/pcre2-${{ version }}.tar.bz2
+  sha256: 53c156e1ba416a20da8e65395daa132da0d80e76910424caca3fcdae7831d384
+
+build:
+  number: 6
+  script:
+    interpreter: brush
+    content:
+      # Options as MSYS2's mingw-w64-pcre2, but pcre2test uses readline
+      # instead of wineditline (MSYS2's patch for the latter is not needed).
+      # libgcc is linked statically: the toolchain's DLLs are not part of
+      # any environment.
+      - >-
+        ./configure --prefix="$PREFIX" --enable-shared --disable-static
+        --enable-jit --enable-pcre2-8 --enable-pcre2-16 --enable-pcre2-32
+        --enable-pcre2grep-libz --enable-pcre2grep-libbz2
+        --enable-pcre2test-libreadline
+        CC="gcc -static-libgcc" CPPFLAGS="-I$PREFIX/include" LDFLAGS="-L$PREFIX/lib"
+        lt_cv_deplibs_check_method=pass_all
+      - make -j"$(nproc)"
+      - make install
+
+requirements:
+  run_exports:
+    - ${{ pin_subpackage('pcre2', upper_bound='x') }}
+  build:
+    - posix-env
+  host:
+    - zlib
+    - bzip2
+    - readline
+
+tests:
+  - script:
+      interpreter: cmd
+      content:
+        - pcre2grep --version
+        - pcre2test -C | findstr /c:"Just-in-time compiler support" || exit /b 1
+        - pcre2test -C | findstr /c:"has libreadline support" || exit /b 1
+        - echo hello> t
+        - bzip2 -k t || exit /b 1
+        - pcre2grep -c "hel+o" t.bz2 | findstr /b 1 || exit /b 1
+  - package_contents:
+      files:
+        - bin/libpcre2-8-0.dll
+        - bin/libpcre2-16-0.dll
+        - bin/libpcre2-32-0.dll
+        - bin/libpcre2-posix-3.dll
+        - lib/libpcre2-8.dll.a
+        - lib/libpcre2-posix.dll.a
+        - lib/pkgconfig/libpcre2-8.pc
+        - include/pcre2.h
+        - include/pcre2posix.h
+
+about:
+  homepage: https://pcre2project.github.io/pcre2/
+  license: BSD-3-Clause WITH PCRE2-exception
+  license_file: LICENCE.md
+  summary: Perl-compatible regular expression library

@@ -1,0 +1,53 @@
+context:
+  version: "0.98.1"
+
+package:
+  name: libb2
+  version: ${{ version }}
+
+source:
+  url: https://github.com/BLAKE2/libb2/releases/download/v${{ version }}/libb2-${{ version }}.tar.gz
+  sha256: 53626fddce753c454a3fea581cbbc7fe9bbcf0bc70416d48fdbbf5d87ef6c72e
+  patches:
+    # Upstream commits after 0.98.1, as in MSYS2's mingw-w64-libb2.
+    - 0001-c4283b34.patch
+    - 0002-186ffdfc.patch
+    - 0003-17059991.patch
+    - 0004-48e205f0.patch
+
+build:
+  number: 0
+  script:
+    interpreter: brush
+    content:
+      # A fat binary picks the SIMD code at run time; the default,
+      # -march=native, would tie the package to the build machine's CPU.
+      # No OpenMP, as MSYS2: libgomp would be a toolchain DLL.  The build
+      # system drops CFLAGS, so flags go in CC.  libgcc is linked
+      # statically: the toolchain's DLLs are not part of any environment.
+      - >-
+        ./configure --prefix="$PREFIX" --enable-shared --disable-static
+        --enable-fat --disable-native --disable-openmp
+        CC="gcc -O2 -static-libgcc" lt_cv_deplibs_check_method=pass_all
+      - make -j"$(nproc)"
+      - make install
+
+requirements:
+  run_exports:
+    - ${{ pin_subpackage('libb2', upper_bound='x.x') }}
+  build:
+    - posix-env
+
+tests:
+  - package_contents:
+      files:
+        - bin/libb2-1.dll
+        - lib/libb2.dll.a
+        - lib/pkgconfig/libb2.pc
+        - include/blake2.h
+
+about:
+  homepage: https://blake2.net/
+  license: CC0-1.0
+  license_file: COPYING
+  summary: BLAKE2 hash function library

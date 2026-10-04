@@ -1,0 +1,20 @@
+Binary I/O by default, as every program in posix-env: the default layer
+is :perlio, not :crlf, which wrote CRLF and dropped CR on Windows.
+binmode (FH, ":crlf") and PERLIO=:unix:crlf still give text mode.
+
+--- a/perlio.c
++++ b/perlio.c
+@@ -979,9 +979,10 @@
+ PerlIO_default_buffer(pTHX_ PerlIO_list_t *av)
+ {
+     PERLIO_FUNCS_DECL(*tab) = &PerlIO_perlio;
+-#ifdef PERLIO_USING_CRLF
+-    tab = &PerlIO_crlf;
+-#else
++    /* posix-env: no :crlf by default on Windows either; the environment's
++       programs read and write bytes.  binmode (FH, ":crlf") still gives
++       it.  */
++#ifndef PERLIO_USING_CRLF
+     if (PerlIO_stdio.Set_ptrcnt)
+         tab = &PerlIO_stdio;
+ #endif

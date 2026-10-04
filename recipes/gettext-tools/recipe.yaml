@@ -1,0 +1,79 @@
+# The tools part of gettext: msgfmt, xgettext, autopoint, ..., libgettextpo
+# and libtextstyle.  The whole tree is built; gettext-runtime's files are
+# already in the host prefix and not packaged again.
+context:
+  version: "1.0"
+
+package:
+  name: gettext-tools
+  version: ${{ version }}
+
+source:
+  url: https://ftpmirror.gnu.org/gnu/gettext/gettext-${{ version }}.tar.xz
+  sha256: 71132a3fb71e68245b8f2ac4e9e97137d3e5c02f415636eb508ae607bc01add7
+  patches:
+    # As in gettext-runtime, which is built along.
+    - 0002-no-gnu-printf-attribute-on-mingw.patch
+    - 0003-envsubst-use-lf-as-newline.patch
+    - 0004-libgettextpo-fsync.patch
+    - 0005-autopoint-bsdtar.patch
+
+build:
+  number: 6
+  script:
+    interpreter: brush
+    file: build.sh
+
+requirements:
+  build:
+    - posix-env
+    # Compresses autopoint's archive.
+    - xz
+  host:
+    - gettext-runtime
+    - libiconv
+    - termcap
+    - scriptexe
+  run:
+    # tar for autopoint.
+    - libarchive
+
+tests:
+  - requirements:
+      run:
+        - posix-env
+        - autoconf
+    script:
+      interpreter: cmd
+      content:
+        - msgfmt --version
+        - xgettext --version
+        - autopoint --version
+        - echo msgid "hello"> t.po
+        - echo msgstr "hallo">> t.po
+        - msgfmt -o t.mo t.po || exit /b 1
+        - msgunfmt t.mo | findstr /c:"hallo" || exit /b 1
+        # autopoint unpacks its infrastructure files with bsdtar.
+        - mkdir p
+        - echo AC_INIT([t],[1])> p\configure.ac
+        - echo AM_GNU_GETTEXT_VERSION([0.25])>> p\configure.ac
+        - echo AM_GNU_GETTEXT([external])>> p\configure.ac
+        - echo AC_OUTPUT>> p\configure.ac
+        - cd p && autopoint > ..\autopoint.log 2>&1 || (type ..\autopoint.log & exit /b 1)
+        # It finds its installation from $0 (scriptexe passes a / path).
+        - findstr /c:"not a directory" ..\autopoint.log && exit /b 1 || (call )
+        - if not exist m4\gettext.m4 exit /b 1
+        - if not exist po\Makefile.in.in exit /b 1
+  - package_contents:
+      files:
+        - bin/libgettextpo-0.dll
+        - bin/libtextstyle-0.dll
+        - include/gettext-po.h
+
+about:
+  homepage: https://www.gnu.org/software/gettext/
+  license: GPL-3.0-or-later
+  license_file:
+    - gettext-tools/COPYING
+    - gettext-tools/gnulib-lib/libxml/COPYING
+  summary: GNU gettext tools

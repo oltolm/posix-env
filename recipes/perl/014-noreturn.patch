@@ -1,0 +1,26 @@
+From MSYS2's mingw-w64-perl (015-noreturn.patch).
+
+diff --git a/win32/perlhost.h b/win32/perlhost.h
+index af5e320..1d41e24 100644
+--- a/win32/perlhost.h
++++ b/win32/perlhost.h
+@@ -1675,6 +1675,9 @@ PerlProcCrypt(const struct IPerlProc** piPerl, const char* clear, const char* sa
+ 
+ PERL_CALLCONV_NO_RET void
+ PerlProcExit(const struct IPerlProc** piPerl, int status)
++#ifdef __clang__
++__attribute__noreturn__
++#endif
+ {
+     PERL_UNUSED_ARG(piPerl);
+     exit(status);
+@@ -1682,6 +1685,9 @@ PerlProcExit(const struct IPerlProc** piPerl, int status)
+ 
+ PERL_CALLCONV_NO_RET void
+ PerlProc_Exit(const struct IPerlProc** piPerl, int status)
++#ifdef __clang__
++__attribute__noreturn__
++#endif
+ {
+     PERL_UNUSED_ARG(piPerl);
+     _exit(status);

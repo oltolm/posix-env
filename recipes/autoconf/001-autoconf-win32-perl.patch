@@ -1,0 +1,36 @@
+Win32 perl starts commands without a shell when it can, and its C runtime does not know single quotes.
+From the posix-env branch of MINGW-packages (mingw-w64-autoconf).
+
+diff --git a/bin/autoheader.in b/bin/autoheader.in
+index a7fc17c..30fef1d 100644
+--- a/bin/autoheader.in
++++ b/bin/autoheader.in
+@@ -198,7 +198,9 @@ my $quoted_tmp = shell_quote ($tmp);
+ }
+ 
+ local (%verbatim, %symbol);
+-debug "$me: 'do'ing $tmp/traces.pl:\n" . `sed 's/^/| /' $quoted_tmp/traces.pl`;
++# Without a shell, Win32 perl would pass sed the quotes too.
++(my $traces = contents ("$tmp/traces.pl")) =~ s/^/| /mg;
++debug "$me: 'do'ing $tmp/traces.pl:\n" . $traces;
+ do "$tmp/traces.pl";
+ warn "couldn't parse $tmp/traces.pl: $@" if $@;
+ unless ($config_h)
+diff --git a/lib/Autom4te/General.pm b/lib/Autom4te/General.pm
+index 03be26d..ead9d6f 100644
+--- a/lib/Autom4te/General.pm
++++ b/lib/Autom4te/General.pm
+@@ -267,6 +267,13 @@ sub shell_quote($)
+   my ($s) = @_;
+   if ($s =~ m![^\w+/.,-]!)
+     {
++      # Win32 perl starts a command without a shell unless it has
++      # redirections or pipes, and the C runtime then splits it with no
++      # regard for single quotes.  Double quotes mean the same to sh and to
++      # the C runtime as long as the string has no '"', '$', '`', doubled
++      # or trailing backslash.
++      return "\"$s\""
++        if $^O eq 'MSWin32' && $s !~ m![\"\$\`]|\\\\|\\$!;
+       # Convert each single quote to '\''
+       $s =~ s/\'/\'\\\'\'/g;
+       # Then single quote the string.

@@ -1,0 +1,75 @@
+context:
+  version: "5.44.0"
+
+package:
+  name: perl
+  version: ${{ version }}
+
+source:
+  url: https://www.cpan.org/src/5.0/perl-${{ version }}.tar.xz
+  sha256: 505cf43912e9480495c344c70260452e32aa2a73c546a026b3f100053b23ce91
+  # MSYS2's mingw-w64-perl series (without 007-do-not-assume-gcc, which it
+  # applies for clang only), regenerated as exact diffs against 5.44.0.
+  patches:
+    - 001-fhs-directory-structure.patch
+    - 002-relocate-html-documentation.patch
+    - 003-replace-batch-scripts-with-bare-perl.patch
+    - 004-fix-cpan-external-programs.patch
+    - 005-rename-cpan-home.patch
+    - 006-generate-manpages.patch
+    - 007-perl5-pr-24453.patch
+    - 008-perl5-pr-24526.patch
+    - 009-perl5-pr-24651.patch
+    - 010-fix-CCLIBDIR.patch
+    - 011-errno-gen-reduce-includes.patch
+    - 012-no-explib.patch
+    - 013-no-description-in-def.patch
+    - 014-noreturn.patch
+    - 015-arm64.patch
+    - 016-copy-clang-runtime.patch
+    - 017-fixes.patch
+    # posix-env: UTF-8 active code page.
+    - 018-utf8-active-code-page.patch
+    # posix-env: the C locale without locale variables.
+    - 019-c-locale-default.patch
+    # posix-env: binary I/O by default.
+    - 020-binary-default-layer.patch
+
+build:
+  number: 4
+  script: build.bat
+
+requirements:
+  build:
+    - posix-env
+
+tests:
+  - script:
+      interpreter: cmd
+      content:
+        - perl -v
+        - perl -MConfig -e "print $Config{installprivlib}, qq{\n}"
+        - perl -MPOSIX -MData::Dumper -MFile::Spec -MDigest::MD5 -e "exit 0" || exit /b 1
+        - perl -e "print qq{ok\n}" | findstr /b ok || exit /b 1
+        # The build prefix in Config was relocated into this environment.
+        # Relocation writes C:/...; PREFIX has backslashes.
+        - 'perl -MConfig -e "exit(index(lc($Config{privlibexp} =~ tr{\\}{/}r), lc($ENV{PREFIX} =~ tr{\\}{/}r)) == 0 ? 0 : 1)" || exit /b 1'
+        # Locales: C.UTF-8 (rattler-build's LC_ALL) without a warning; C
+        # without locale variables; Config names no setlocale wrapping.
+        - perl -e "exit 0" 2>&1 | findstr /c:"locale" && exit /b 1 || (call )
+        - set LC_ALL=
+        - set LANG=
+        - 'perl -MPOSIX -e "exit(setlocale(LC_ALL) eq q{C} ? 0 : 1)" || exit /b 1'
+        - 'perl -MConfig -e "exit(qq{$Config{ld} $Config{libs}} =~ /wrap|c-locale/ ? 1 : 0)" || exit /b 1'
+        # Binary I/O: "\n" is one byte on stdout and in files.
+        - perl -e "print qq{a\n}" > o.txt
+        - perl -e "open my $f, q{>}, q{f.txt} or die; print $f qq{b\n}; close $f"
+        - 'perl -e "exit((-s q{o.txt}) == 2 && (-s q{f.txt}) == 2 ? 0 : 1)" || exit /b 1'
+
+about:
+  homepage: https://www.perl.org/
+  license: GPL-1.0-or-later OR Artistic-1.0-Perl
+  license_file:
+    - Copying
+    - Artistic
+  summary: Perl 5, the native Win32 build

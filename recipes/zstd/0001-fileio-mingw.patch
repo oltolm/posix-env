@@ -1,0 +1,26 @@
+Use _fseeki64/_ftelli64 on all Windows compilers, not only MSVC; MinGW
+otherwise falls back to fseek/ftell with a 32-bit long.  From MSYS2's
+mingw-w64-zstd (zstd-1.4.0-fileio-mingw.patch).
+
+--- a/contrib/seekable_format/zstdseek_decompress.c
++++ b/contrib/seekable_format/zstdseek_decompress.c
+@@ -80,7 +80,7 @@
+ #if defined(LIBC_NO_FSEEKO)
+ /* Some older libc implementations don't include these functions (e.g. Bionic < 24) */
+ #   define LONG_SEEK fseek
+-#elif defined(_MSC_VER) && _MSC_VER >= 1400
++#elif defined(_WIN32)
+ #   define LONG_SEEK _fseeki64
+ #elif !defined(__64BIT__) && (PLATFORM_POSIX_VERSION >= 200112L) /* No point defining Large file for 64 bit */
+ #   define LONG_SEEK fseeko
+--- a/programs/fileio_common.h
++++ b/programs/fileio_common.h
+@@ -79,7 +79,7 @@
+ /* Some older libc implementations don't include these functions (e.g. Bionic < 24) */
+ #   define LONG_SEEK fseek
+ #   define LONG_TELL ftell
+-#elif defined(_MSC_VER) && _MSC_VER >= 1400
++#elif defined(_WIN32)
+ #   define LONG_SEEK _fseeki64
+ #   define LONG_TELL _ftelli64
+ #elif !defined(__64BIT__) && (PLATFORM_POSIX_VERSION >= 200112L) /* No point defining Large file for 64 bit */

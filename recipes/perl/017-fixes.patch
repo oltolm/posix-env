@@ -1,0 +1,24 @@
+From MSYS2's mingw-w64-perl (019-fixes.patch).
+
+diff --git a/perl.h b/perl.h
+index 1b5d355..05ca5bc 100644
+--- a/perl.h
++++ b/perl.h
+@@ -2734,7 +2734,7 @@ extern long double Perl_my_frexpl(long double x, int *e);
+ #   ifndef Perl_isfinite
+ #     ifdef HAS_ISFINITE
+ #       define Perl_isfinite(x) isfinite(x)
+-#     elif defined(HAS_FINITE)
++#     elif defined(HAS_FINITE) && !defined(__MINGW32__)
+ #       define Perl_isfinite(x) finite(x)
+ #     endif
+ #   endif
+@@ -2910,7 +2910,7 @@ extern long double Perl_my_frexpl(long double x, int *e);
+ #endif
+ 
+ /* Win32: _fpclass(), _isnan(), _finite(). */
+-#ifdef _MSC_VER
++#ifdef _WIN32
+ #  ifndef Perl_isnan
+ #    define Perl_isnan(x) _isnan(x)
+ #  endif

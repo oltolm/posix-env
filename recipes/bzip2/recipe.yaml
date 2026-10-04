@@ -1,0 +1,53 @@
+context:
+  version: "1.0.8"
+
+package:
+  name: bzip2
+  version: ${{ version }}
+
+source:
+  url: https://sourceware.org/pub/bzip2/bzip2-${{ version }}.tar.gz
+  sha256: ab5a03176ee106d3f0fa90e381da478ddae405918153cca248e682cd0c4a2269
+  patches:
+    - 0001-cygming.patch
+    - 0002-buildsystem.patch
+    - 0003-progress.patch
+
+build:
+  number: 3
+  script:
+    interpreter: brush
+    file: build.sh
+
+requirements:
+  run_exports:
+    - ${{ pin_subpackage('bzip2', upper_bound='x') }}
+  build:
+    - posix-env
+    - autoconf
+  host:
+    - scriptexe
+
+tests:
+  - requirements:
+      run:
+        - posix-env
+    script:
+      interpreter: cmd
+      content:
+        - echo hello> t
+        - bzip2 -k --show-progress t || exit /b 1
+        - bzcat t.bz2 | findstr /b hello || exit /b 1
+        - bzegrep -c "hel+o" t.bz2 | findstr /b 1 || exit /b 1
+  - package_contents:
+      files:
+        - bin/libbz2-1.dll
+        - lib/libbz2.dll.a
+        - lib/pkgconfig/bzip2.pc
+        - include/bzlib.h
+
+about:
+  homepage: https://sourceware.org/bzip2/
+  license: bzip2-1.0.6
+  license_file: LICENSE
+  summary: Block-sorting compression library and bzip2 program

@@ -1,0 +1,76 @@
+From f6cd2bbcdd65b66d366d75b26afe0f1fae977762 Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Thu, 1 Oct 2026 17:00:24 +0200
+Subject: [PATCH 2/5] sed: drop the backslash of unknown escapes in
+ replacements
+
+In a replacement, GNU sed turns `\c` into `c` when the escape has no
+special meaning (`echo x | sed 's/x/a\q/'` prints `aq`); this kept the
+backslash. libtool quotes single quotes with `s/'/'\\\''/g`, which then
+produced `'\\''` and a config.status that failed to parse.
+
+Drop the backslash as GNU sed does. GNU's case-conversion escapes
+(\L, \U, \l, \u, \E) are not implemented and stay literal, so their use
+remains visible.
+---
+ src/sed/compiler.rs | 23 ++++++++++++++++++++---
+ 1 file changed, 20 insertions(+), 3 deletions(-)
+
+diff --git a/src/sed/compiler.rs b/src/sed/compiler.rs
+index 76cf2d5..2912ace 100644
+--- a/src/sed/compiler.rs
++++ b/src/sed/compiler.rs
+@@ -775,10 +775,17 @@ pub fn compile_replacement(
+                         _ => {
+                             if let Some(decoded) = parse_char_escape(line) {
+                                 push_script_char(&mut literal, decoded, character_mode);
+-                            } else {
++                            } else if matches!(line.current(), 'L' | 'U' | 'l' | 'u' | 'E') {
++                                // GNU case-conversion escapes are not implemented;
++                                // keep them visible rather than dropping the backslash.
+                                 literal.push(b'\\');
+                                 literal.push(line.current_byte());
+                                 line.advance();
++                            } else {
++                                // As in GNU sed, a backslash before any other character
++                                // yields that character; libtool relies on `\'` -> `'`.
++                                literal.push(line.current_byte());
++                                line.advance();
+                             }
+                         }
+                     }
+@@ -2450,6 +2457,15 @@ mod tests {
+         assert!(matches!(&template.parts[0], ReplacementPart::Literal(s) if s == b"C:/src"));
+     }
+ 
++    #[test]
++    fn test_compile_replacement_unknown_escape() {
++        let (mut lines, mut chars) = make_providers(r"/'\\\''/");
++        let template = compile_replacement_utf8(&mut lines, &mut chars).unwrap();
++
++        assert_eq!(template.parts.len(), 1);
++        assert!(matches!(&template.parts[0], ReplacementPart::Literal(s) if s == br"'\''"));
++    }
++
+     #[test]
+     fn test_compile_replacement_escape_sequences() {
+         let (mut lines, mut chars) = make_providers("/line\\nnewline\\tend/");
+@@ -2513,12 +2529,13 @@ mod tests {
+     }
+ 
+     #[test]
+-    fn test_compile_replacement_preserves_unknown_escape() {
++    fn test_compile_replacement_drops_backslash_of_unknown_escape() {
++        // GNU sed 4.9: `echo x | sed 's/x/a\q/'` prints `aq`.
+         let (mut lines, mut chars) = make_providers(r"/a\q/");
+         let template = compile_replacement_utf8(&mut lines, &mut chars).unwrap();
+ 
+         assert_eq!(template.parts.len(), 1);
+-        assert!(matches!(&template.parts[0], ReplacementPart::Literal(s) if s == br"a\q"));
++        assert!(matches!(&template.parts[0], ReplacementPart::Literal(s) if s == b"aq"));
+     }
+ 
+     #[test]
+-- 
+2.56.0.windows.1
+

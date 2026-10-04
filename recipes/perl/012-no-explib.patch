@@ -1,0 +1,39 @@
+From MSYS2's mingw-w64-perl (013-no-explib.patch).
+
+diff --git a/dist/ExtUtils-CBuilder/lib/ExtUtils/CBuilder/Platform/Windows/GCC.pm b/dist/ExtUtils-CBuilder/lib/ExtUtils/CBuilder/Platform/Windows/GCC.pm
+index c60946f..9ac9120 100644
+--- a/dist/ExtUtils-CBuilder/lib/ExtUtils/CBuilder/Platform/Windows/GCC.pm
++++ b/dist/ExtUtils-CBuilder/lib/ExtUtils/CBuilder/Platform/Windows/GCC.pm
+@@ -69,6 +69,9 @@ sub format_linker_cmd {
+ sub write_linker_script {
+   my ($self, %spec) = @_;
+ 
++  # Punt for now
++  return %spec;
++
+   my $script = File::Spec->catfile( $spec{srcdir},
+                                     $spec{basename} . '.lds' );
+ 
+diff --git a/win32/GNUmakefile b/win32/GNUmakefile
+index fe9015d..27cad95 100644
+--- a/win32/GNUmakefile
++++ b/win32/GNUmakefile
+@@ -1444,15 +1444,15 @@ $(PERLEXPLIB) : $(PERLIMPLIB)
+ 
+ $(PERLIMPLIB) : perldll.def
+ ifeq ($(CCTYPE),GCC)
+-	$(IMPLIB) -k -d perldll.def -D $(PERLDLLBASE) -l $(PERLIMPLIB) -e $(PERLEXPLIB)
++	$(IMPLIB) -k -d perldll.def -D $(PERLDLLBASE) -l $(PERLIMPLIB)
+ else
+ 	lib -def:perldll.def -machine:$(ARCHITECTURE) /OUT:$(PERLIMPLIB)
+ endif
+ 
+-$(PERLDLL): $(PERLEXPLIB) $(PERLDLL_OBJ) $(PERLDLL_RES) Extensions_static
++$(PERLDLL): perldll.def $(PERLDLL_OBJ) $(PERLDLL_RES) Extensions_static
+ ifeq ($(CCTYPE),GCC)
+ 	$(LINK32) -shared -o $@ $(BLINK_FLAGS) \
+-	   $(PERLDLL_OBJ) $(shell type Extensions_static) $(LIBFILES) $(PERLEXPLIB)
++	   $(PERLDLL_OBJ) $(shell type Extensions_static) $(LIBFILES) perldll.def
+ else
+ 	$(LINK32) -dll -out:$@ $(BLINK_FLAGS) \
+ 	    @Extensions_static \

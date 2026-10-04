@@ -1,0 +1,557 @@
+From 4891e4cb1e448956cd1b3d4a704dd96a3cfe4542 Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Sat, 3 Oct 2026 18:07:24 +0200
+Subject: [PATCH 20/21] fix: ignore break and continue outside a loop, as bash
+ does
+
+Outside a loop, `break` and `continue` still returned loop control flow,
+which nothing consumed: a script run from a file stopped there with
+status 0.  gawk's configure has a stray `break` in its mpfr check
+(unspecified in POSIX, a no-op in bash, dash and ksh), so configure
+ended early without an error.
+
+Count the loops enclosing the current command, starting again at 0 in
+functions and subshells as bash does.  Outside a loop, warn and return
+0; `break n` and `continue n` beyond the enclosing loops act on the
+outermost one.
+
+Assisted-by: Claude Code:claude-opus-5-5
+---
+ brush-builtins/src/break_.rs                  |  17 +-
+ brush-builtins/src/continue_.rs               |  17 +-
+ brush-core/src/commands.rs                    |   3 +
+ brush-core/src/interp.rs                      | 247 ++++++++++--------
+ brush-core/src/shell.rs                       |  15 ++
+ brush-core/src/shell/builder.rs               |   1 +
+ .../tests/cases/compat/builtins/break.yaml    |  64 +++++
+ 7 files changed, 253 insertions(+), 111 deletions(-)
+ create mode 100644 brush-shell/tests/cases/compat/builtins/break.yaml
+
+diff --git a/brush-builtins/src/break_.rs b/brush-builtins/src/break_.rs
+index d16a0394..255db8ee 100644
+--- a/brush-builtins/src/break_.rs
++++ b/brush-builtins/src/break_.rs
+@@ -1,4 +1,5 @@
+ use clap::Parser;
++use std::io::Write;
+ 
+ use brush_core::{ExecutionControlFlow, ExecutionExitCode, ExecutionResult, builtins};
+ 
+@@ -15,18 +16,30 @@ impl builtins::Command for BreakCommand {
+ 
+     async fn execute<SE: brush_core::ShellExtensions>(
+         &self,
+-        _context: brush_core::ExecutionContext<'_, SE>,
++        context: brush_core::ExecutionContext<'_, SE>,
+     ) -> Result<brush_core::ExecutionResult, Self::Error> {
+         // If specified, which_loop needs to be positive.
+         if self.which_loop <= 0 {
+             return Ok(ExecutionExitCode::InvalidUsage.into());
+         }
+ 
++        // Like bash, warn and carry on outside a loop.
++        let loop_depth = context.shell.loop_depth();
++        if loop_depth == 0 {
++            let _ = writeln!(
++                context.stderr(),
++                "{}: only meaningful in a `for', `while', or `until' loop",
++                context.command_name
++            );
++            return Ok(ExecutionResult::success());
++        }
++
+         let mut result = ExecutionResult::success();
+ 
++        // Breaking out of more loops than there are leaves all of them.
+         result.next_control_flow = ExecutionControlFlow::BreakLoop {
+             #[expect(clippy::cast_sign_loss)]
+-            levels: (self.which_loop - 1) as usize,
++            levels: (self.which_loop as usize).min(loop_depth) - 1,
+         };
+ 
+         Ok(result)
+diff --git a/brush-builtins/src/continue_.rs b/brush-builtins/src/continue_.rs
+index 8634097a..3febf9ac 100644
+--- a/brush-builtins/src/continue_.rs
++++ b/brush-builtins/src/continue_.rs
+@@ -1,4 +1,5 @@
+ use clap::Parser;
++use std::io::Write;
+ 
+ use brush_core::{ExecutionControlFlow, ExecutionExitCode, ExecutionResult, builtins};
+ 
+@@ -15,18 +16,30 @@ impl builtins::Command for ContinueCommand {
+ 
+     async fn execute<SE: brush_core::ShellExtensions>(
+         &self,
+-        _context: brush_core::ExecutionContext<'_, SE>,
++        context: brush_core::ExecutionContext<'_, SE>,
+     ) -> Result<brush_core::ExecutionResult, Self::Error> {
+         // If specified, which_loop needs to be positive.
+         if self.which_loop <= 0 {
+             return Ok(ExecutionExitCode::InvalidUsage.into());
+         }
+ 
++        // Like bash, warn and carry on outside a loop.
++        let loop_depth = context.shell.loop_depth();
++        if loop_depth == 0 {
++            let _ = writeln!(
++                context.stderr(),
++                "{}: only meaningful in a `for', `while', or `until' loop",
++                context.command_name
++            );
++            return Ok(ExecutionResult::success());
++        }
++
+         let mut result = ExecutionResult::success();
+ 
++        // Continuing more loops than there are continues the outermost one.
+         result.next_control_flow = ExecutionControlFlow::ContinueLoop {
+             #[expect(clippy::cast_sign_loss)]
+-            levels: (self.which_loop - 1) as usize,
++            levels: (self.which_loop as usize).min(loop_depth) - 1,
+         };
+ 
+         Ok(result)
+diff --git a/brush-core/src/commands.rs b/brush-core/src/commands.rs
+index 359f1a05..afd3f2c5 100644
+--- a/brush-core/src/commands.rs
++++ b/brush-core/src/commands.rs
+@@ -817,7 +817,10 @@ pub(crate) async fn invoke_shell_function(
+     // so the parameters are passed through by shared reference rather than cloned. This prevents
+     // direct mutation of the caller's `ExecutionParameters` open-file table, though the function
+     // may still change the shell's persistent open files via builtins (e.g. `exec`).
++    // As in bash, `break` and `continue` in a function do not reach the caller's loops.
++    let outer_loop_depth = context.shell.replace_loop_depth(0);
+     let result = body.execute(context.shell, &context.params).await;
++    context.shell.replace_loop_depth(outer_loop_depth);
+ 
+     // We've come back out, reflect it.
+     context.shell.leave_function()?;
+diff --git a/brush-core/src/interp.rs b/brush-core/src/interp.rs
+index fd7af4c4..06d7e8b0 100644
+--- a/brush-core/src/interp.rs
++++ b/brush-core/src/interp.rs
+@@ -827,63 +827,74 @@ impl Execute for ast::ForClauseCommand {
+         shell: &mut Shell<impl extensions::ShellExtensions>,
+         params: &ExecutionParameters,
+     ) -> Result<ExecutionResult, error::Error> {
+-        let mut result = ExecutionResult::success();
+-
+-        // If we were given explicit words to iterate over, then expand them all, with splitting
+-        // enabled.
+-        let expanded_values = if let Some(unexpanded_values) = &self.values {
+-            expand_words(shell, params, unexpanded_values).await?
+-        } else {
+-            // Otherwise, we use the current positional parameters.
+-            shell.current_shell_args().to_vec()
+-        };
++        let outer_loop_depth = shell.replace_loop_depth(shell.loop_depth() + 1);
++        let result = execute_for_loop(self, shell, params).await;
++        shell.replace_loop_depth(outer_loop_depth);
++        result
++    }
++}
+ 
+-        for value in expanded_values {
+-            if shell.options().print_commands_and_arguments {
+-                if let Some(unexpanded_values) = &self.values {
+-                    shell
+-                        .trace_command(
+-                            params,
+-                            std::format!(
+-                                "for {} in {}",
+-                                self.variable_name,
+-                                unexpanded_values.iter().join(" ")
+-                            ),
+-                        )
+-                        .await;
+-                } else {
+-                    shell
+-                        .trace_command(params, std::format!("for {}", self.variable_name))
+-                        .await;
+-                }
+-            }
++async fn execute_for_loop(
++    command: &ast::ForClauseCommand,
++    shell: &mut Shell<impl extensions::ShellExtensions>,
++    params: &ExecutionParameters,
++) -> Result<ExecutionResult, error::Error> {
++    let mut result = ExecutionResult::success();
+ 
+-            // Update the variable.
+-            shell.env_mut().update_or_add(
+-                &self.variable_name,
+-                ShellValueLiteral::Scalar(value),
+-                |_| Ok(()),
+-                EnvironmentLookup::Anywhere,
+-                EnvironmentScope::Global,
+-            )?;
++    // If we were given explicit words to iterate over, then expand them all, with splitting
++    // enabled.
++    let expanded_values = if let Some(unexpanded_values) = &command.values {
++        expand_words(shell, params, unexpanded_values).await?
++    } else {
++        // Otherwise, we use the current positional parameters.
++        shell.current_shell_args().to_vec()
++    };
+ 
+-            result = self.body.list.execute(shell, params).await?;
+-            if result.is_return_or_exit() {
+-                break;
++    for value in expanded_values {
++        if shell.options().print_commands_and_arguments {
++            if let Some(unexpanded_values) = &command.values {
++                shell
++                    .trace_command(
++                        params,
++                        std::format!(
++                            "for {} in {}",
++                            command.variable_name,
++                            unexpanded_values.iter().join(" ")
++                        ),
++                    )
++                    .await;
++            } else {
++                shell
++                    .trace_command(params, std::format!("for {}", command.variable_name))
++                    .await;
+             }
++        }
+ 
+-            let is_break = result.is_break();
++        // Update the variable.
++        shell.env_mut().update_or_add(
++            &command.variable_name,
++            ShellValueLiteral::Scalar(value),
++            |_| Ok(()),
++            EnvironmentLookup::Anywhere,
++            EnvironmentScope::Global,
++        )?;
++
++        result = command.body.list.execute(shell, params).await?;
++        if result.is_return_or_exit() {
++            break;
++        }
+ 
+-            result.next_control_flow = result.next_control_flow.try_decrement_loop_levels();
++        let is_break = result.is_break();
+ 
+-            if is_break || result.is_continue() {
+-                break;
+-            }
+-        }
++        result.next_control_flow = result.next_control_flow.try_decrement_loop_levels();
+ 
+-        shell.set_last_exit_status(result.exit_code.into());
+-        Ok(result)
++        if is_break || result.is_continue() {
++            break;
++        }
+     }
++
++    shell.set_last_exit_status(result.exit_code.into());
++    Ok(result)
+ }
+ 
+ #[async_trait::async_trait]
+@@ -1018,55 +1029,66 @@ impl Execute for (WhileOrUntil, &ast::WhileOrUntilClauseCommand) {
+         shell: &mut Shell<impl extensions::ShellExtensions>,
+         params: &ExecutionParameters,
+     ) -> Result<ExecutionResult, error::Error> {
+-        let is_while = match self.0 {
+-            WhileOrUntil::While => true,
+-            WhileOrUntil::Until => false,
+-        };
+-        let test_condition = &self.1.0;
+-        let body = &self.1.1;
++        let outer_loop_depth = shell.replace_loop_depth(shell.loop_depth() + 1);
++        let result = execute_while_or_until_loop(self, shell, params).await;
++        shell.replace_loop_depth(outer_loop_depth);
++        result
++    }
++}
+ 
+-        let mut result = ExecutionResult::success();
++async fn execute_while_or_until_loop(
++    command: &(WhileOrUntil, &ast::WhileOrUntilClauseCommand),
++    shell: &mut Shell<impl extensions::ShellExtensions>,
++    params: &ExecutionParameters,
++) -> Result<ExecutionResult, error::Error> {
++    let is_while = match command.0 {
++        WhileOrUntil::While => true,
++        WhileOrUntil::Until => false,
++    };
++    let test_condition = &command.1.0;
++    let body = &command.1.1;
+ 
+-        // Execute loop condition with errexit suppressed
+-        let mut condition_params = params.clone();
+-        condition_params.suppress_errexit = true;
++    let mut result = ExecutionResult::success();
+ 
+-        loop {
+-            let condition_result = test_condition.execute(shell, &condition_params).await?;
++    // Execute loop condition with errexit suppressed
++    let mut condition_params = params.clone();
++    condition_params.suppress_errexit = true;
+ 
+-            // Update status for condition
+-            shell.set_last_exit_status(condition_result.exit_code.into());
++    loop {
++        let condition_result = test_condition.execute(shell, &condition_params).await?;
+ 
+-            if !condition_result.is_normal_flow() {
+-                result = condition_result;
++        // Update status for condition
++        shell.set_last_exit_status(condition_result.exit_code.into());
+ 
+-                // If the condition has break/continue, the while/until loop itself
+-                // consumes one level. We need to decrement the level before returning.
+-                result.next_control_flow = result.next_control_flow.try_decrement_loop_levels();
+-                break;
+-            }
++        if !condition_result.is_normal_flow() {
++            result = condition_result;
+ 
+-            if condition_result.is_success() != is_while {
+-                break;
+-            }
++            // If the condition has break/continue, the while/until loop itself
++            // consumes one level. We need to decrement the level before returning.
++            result.next_control_flow = result.next_control_flow.try_decrement_loop_levels();
++            break;
++        }
+ 
+-            result = body.list.execute(shell, params).await?;
+-            if result.is_return_or_exit() {
+-                break;
+-            }
++        if condition_result.is_success() != is_while {
++            break;
++        }
+ 
+-            let is_break = result.is_break();
++        result = body.list.execute(shell, params).await?;
++        if result.is_return_or_exit() {
++            break;
++        }
+ 
+-            result.next_control_flow = result.next_control_flow.try_decrement_loop_levels();
++        let is_break = result.is_break();
+ 
+-            if is_break || result.is_continue() {
+-                break;
+-            }
+-        }
++        result.next_control_flow = result.next_control_flow.try_decrement_loop_levels();
+ 
+-        shell.set_last_exit_status(result.exit_code.into());
+-        Ok(result)
++        if is_break || result.is_continue() {
++            break;
++        }
+     }
++
++    shell.set_last_exit_status(result.exit_code.into());
++    Ok(result)
+ }
+ 
+ #[async_trait::async_trait]
+@@ -1096,40 +1118,51 @@ impl Execute for ast::ArithmeticForClauseCommand {
+         shell: &mut Shell<impl extensions::ShellExtensions>,
+         params: &ExecutionParameters,
+     ) -> Result<ExecutionResult, error::Error> {
+-        let mut result = ExecutionResult::success();
+-        if let Some(initializer) = &self.initializer {
+-            initializer.eval(shell, params, true).await?;
+-        }
++        let outer_loop_depth = shell.replace_loop_depth(shell.loop_depth() + 1);
++        let result = execute_arithmetic_for_loop(self, shell, params).await;
++        shell.replace_loop_depth(outer_loop_depth);
++        result
++    }
++}
+ 
+-        loop {
+-            if let Some(condition) = &self.condition {
+-                // An empty condition (e.g., `for (( ; ; ))`) means "always true".
+-                if !condition.value.is_empty() && condition.eval(shell, params, true).await? == 0 {
+-                    break;
+-                }
+-            }
++async fn execute_arithmetic_for_loop(
++    command: &ast::ArithmeticForClauseCommand,
++    shell: &mut Shell<impl extensions::ShellExtensions>,
++    params: &ExecutionParameters,
++) -> Result<ExecutionResult, error::Error> {
++    let mut result = ExecutionResult::success();
++    if let Some(initializer) = &command.initializer {
++        initializer.eval(shell, params, true).await?;
++    }
+ 
+-            result = self.body.list.execute(shell, params).await?;
+-            if result.is_return_or_exit() {
++    loop {
++        if let Some(condition) = &command.condition {
++            // An empty condition (e.g., `for (( ; ; ))`) means "always true".
++            if !condition.value.is_empty() && condition.eval(shell, params, true).await? == 0 {
+                 break;
+             }
++        }
+ 
+-            let is_break = result.is_break();
++        result = command.body.list.execute(shell, params).await?;
++        if result.is_return_or_exit() {
++            break;
++        }
+ 
+-            result.next_control_flow = result.next_control_flow.try_decrement_loop_levels();
++        let is_break = result.is_break();
+ 
+-            if is_break || result.is_continue() {
+-                break;
+-            }
++        result.next_control_flow = result.next_control_flow.try_decrement_loop_levels();
+ 
+-            if let Some(updater) = &self.updater {
+-                updater.eval(shell, params, true).await?;
+-            }
++        if is_break || result.is_continue() {
++            break;
+         }
+ 
+-        shell.set_last_exit_status(result.exit_code.into());
+-        Ok(result)
++        if let Some(updater) = &command.updater {
++            updater.eval(shell, params, true).await?;
++        }
+     }
++
++    shell.set_last_exit_status(result.exit_code.into());
++    Ok(result)
+ }
+ 
+ #[async_trait::async_trait]
+diff --git a/brush-core/src/shell.rs b/brush-core/src/shell.rs
+index bca769d5..65d075fd 100644
+--- a/brush-core/src/shell.rs
++++ b/brush-core/src/shell.rs
+@@ -101,6 +101,9 @@ pub struct Shell<SE: extensions::ShellExtensions = extensions::DefaultShellExten
+     /// Clone depth from the original ancestor shell.
+     depth: usize,
+ 
++    /// Number of loops enclosing the current command; functions and subshells start at 0.
++    loop_depth: usize,
++
+     /// Shell name
+     name: Option<String>,
+ 
+@@ -184,6 +187,7 @@ impl<SE: extensions::ShellExtensions> Clone for Shell<SE> {
+             key_bindings: self.key_bindings.clone(),
+             history: self.history.clone(),
+             depth: self.depth + 1,
++            loop_depth: 0,
+         }
+     }
+ }
+@@ -260,6 +264,17 @@ impl<SE: extensions::ShellExtensions> Shell<SE> {
+ }
+ 
+ impl<SE: extensions::ShellExtensions> Shell<SE> {
++    /// Returns the number of loops enclosing the current command, counting only those in
++    /// the current function or subshell, as `break` and `continue` do.
++    pub const fn loop_depth(&self) -> usize {
++        self.loop_depth
++    }
++
++    /// Sets the loop depth, returning the previous one.
++    pub(crate) const fn replace_loop_depth(&mut self, loop_depth: usize) -> usize {
++        std::mem::replace(&mut self.loop_depth, loop_depth)
++    }
++
+     /// Increments the interactive line offset in the shell by the indicated number
+     /// of lines.
+     ///
+diff --git a/brush-core/src/shell/builder.rs b/brush-core/src/shell/builder.rs
+index 52203a33..5486d919 100644
+--- a/brush-core/src/shell/builder.rs
++++ b/brush-core/src/shell/builder.rs
+@@ -252,6 +252,7 @@ impl<SE: extensions::ShellExtensions> Default for Shell<SE> {
+             last_exit_status_change_count: 0,
+             last_pipeline_statuses: vec![0],
+             depth: 0,
++            loop_depth: 0,
+             name: None,
+             args: vec![],
+             version: None,
+diff --git a/brush-shell/tests/cases/compat/builtins/break.yaml b/brush-shell/tests/cases/compat/builtins/break.yaml
+new file mode 100644
+index 00000000..042d9bbd
+--- /dev/null
++++ b/brush-shell/tests/cases/compat/builtins/break.yaml
+@@ -0,0 +1,64 @@
++name: "Builtins: break and continue"
++cases:
++  - name: "Break outside loop"
++    ignore_stderr: true
++    stdin: |
++      if true; then
++        break
++      fi
++      echo "status: $?"
++
++  - name: "Break outside loop in script"
++    ignore_stderr: true
++    test_files:
++      - path: "script.sh"
++        contents: |
++          if true; then
++            break
++          fi
++          echo "status: $?"
++    args: ["./script.sh"]
++
++  - name: "Continue outside loop"
++    ignore_stderr: true
++    stdin: |
++      continue
++      echo "status: $?"
++
++  - name: "Break in function called from loop"
++    ignore_stderr: true
++    stdin: |
++      f() { break; }
++      for i in 1 2; do
++        f
++        echo "i=$i"
++      done
++
++  - name: "Break in subshell inside loop"
++    ignore_stderr: true
++    stdin: |
++      for i in 1 2; do
++        (break; echo "in subshell")
++        echo "i=$i"
++      done
++
++  - name: "Break more levels than loops"
++    stdin: |
++      for i in 1 2; do
++        for j in a b; do
++          break 5
++        done
++        echo "not reached"
++      done
++      echo "after loops"
++
++  - name: "Continue more levels than loops"
++    stdin: |
++      for i in 1 2; do
++        for j in a b; do
++          continue 5
++          echo "not reached"
++        done
++        echo "not reached"
++      done
++      echo "i=$i"

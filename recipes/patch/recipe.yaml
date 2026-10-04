@@ -1,0 +1,57 @@
+context:
+  version: "2.8"
+
+package:
+  name: patch
+  version: ${{ version }}
+
+source:
+  url: https://ftpmirror.gnu.org/gnu/patch/patch-${{ version }}.tar.xz
+  sha256: f87cee69eec2b4fcbf60a396b030ad6aa3415f192aa5f7ee84cad5e11f7f5ae3
+  patches:
+    # gnulib's backupfile calls rewinddir on its own DIR wrapper.
+    - 0001-backupfile-rewinddir.patch
+    # getrlimit, S_IFLNK, owners and groups, POSIX signals.
+    - 0002-native-windows.patch
+
+build:
+  number: 0
+  script:
+    interpreter: brush
+    content:
+      # libgcc is linked statically: the toolchain's DLLs are not part of
+      # any environment.  Binary I/O comes from posix-env's config.site:
+      # patches apply to LF files as on POSIX systems.
+      - ./configure --prefix="$PREFIX" CC="gcc -static-libgcc"
+      - make -j"$(nproc)"
+      - make install
+
+requirements:
+  build:
+    - posix-env
+
+tests:
+  - requirements:
+      run:
+        - posix-env
+        - diffutils
+    script:
+      interpreter: cmd
+      content:
+        - patch --version
+        - sh -c "printf 'a\nb\nc\n' > old && printf 'a\nB\nc\n' > new && cp old f" || exit /b 1
+        - sh -c "diff -u old new > p.diff; patch f < p.diff && cmp f new" || exit /b 1
+        # Reverse, with a backup file (rename over an existing file).
+        - sh -c "patch -R -b f < p.diff && cmp f old && cmp f.orig new" || exit /b 1
+        # Numbered backups (patch 0001's code).
+        - sh -c "cp old g && patch -b -V numbered g < p.diff && cp old g && patch -b -V numbered g < p.diff && cmp g.~1~ old && cmp g.~2~ old" || exit /b 1
+        # A hunk that does not apply: exit status 1 and a .rej file.
+        - sh -c "printf 'a\nX\nc\n' > h; patch h < p.diff; test $? -eq 1 && test -f h.rej" || exit /b 1
+        # -p1 with directories, as in git-style patches.
+        - sh -c "mkdir -p a/d b/d && cp old a/d/x && cp new b/d/x && diff -ru a b > d.diff; cp -r a w && cd w && patch -p1 < ../d.diff && cmp d/x ../new" || exit /b 1
+
+about:
+  homepage: https://www.gnu.org/software/patch/
+  license: GPL-3.0-or-later
+  license_file: COPYING
+  summary: GNU patch, applies diffs to files

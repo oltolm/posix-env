@@ -1,0 +1,18 @@
+From MSYS2's mingw-w64-readline.
+
+diff --git a/rlwinsize.h b/rlwinsize.h
+index eaf7fbf..e3491ec 100644
+--- a/rlwinsize.h
++++ b/rlwinsize.h
+@@ -55,6 +55,11 @@
+ #  define tcflow(fd, action)	ioctl(fd, TCXONC, action)
+ #endif
+ 
++#if defined (__MINGW32__)
++// On Windows, define dummy struct with no fields.
++struct winsize {};
++#endif
++
+ extern int _rl_tcgetwinsize (int, struct winsize *);
+ extern void _rl_tcsetwinsize (int, struct winsize *);
+ 

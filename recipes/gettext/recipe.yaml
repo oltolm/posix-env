@@ -1,0 +1,72 @@
+# The runtime part of gettext only: libintl, libasprintf and the gettext,
+# ngettext and envsubst programs.  gettext-tools (msgfmt, autopoint, ...)
+# is a separate, later package.
+context:
+  version: "1.0"
+
+package:
+  name: gettext-runtime
+  version: ${{ version }}
+
+source:
+  url: https://ftpmirror.gnu.org/gnu/gettext/gettext-${{ version }}.tar.xz
+  sha256: 71132a3fb71e68245b8f2ac4e9e97137d3e5c02f415636eb508ae607bc01add7
+  patches:
+    - 0002-no-gnu-printf-attribute-on-mingw.patch
+    - 0003-envsubst-use-lf-as-newline.patch
+
+build:
+  number: 9
+  script:
+    interpreter: brush
+    content:
+      - cd gettext-runtime
+      # libgcc and libstdc++ (libasprintf is C++) are linked statically: the
+      # toolchain's DLLs are not part of any environment.  pass_all: libtool's
+      # file_magic check drops a static archive from a DLL's dependencies.
+      - >-
+        ./configure --prefix="$PREFIX" --enable-shared --disable-static
+        --enable-threads=windows --enable-relocatable --disable-rpath
+        --with-libiconv-prefix="$PREFIX" --disable-java --disable-csharp
+        CC="gcc -static-libgcc" CXX="g++ -static-libgcc -static-libstdc++"
+        lt_cv_deplibs_check_method=pass_all
+      # libtool links C++ libraries with -nostdlib and its own -lstdc++ and
+      # -lpthread, which ignores -static-libstdc++; name the static archives
+      # instead.  libasprintf has its own configure and libtool.
+      - >-
+        find . -name libtool -type f -exec sed -i
+        -e "/^postdeps=/s|-lstdc++|$(g++ -print-file-name=libstdc++.a)|"
+        -e "/^postdeps=/s|-lpthread|$(g++ -print-file-name=libpthread.a)|" {} +
+      - make -j"$(nproc)"
+      - make install
+
+requirements:
+  run_exports:
+    - ${{ pin_subpackage('gettext-runtime', upper_bound='x') }}
+  build:
+    - posix-env
+  host:
+    - libiconv
+
+tests:
+  - script:
+      interpreter: cmd
+      content:
+        - gettext --version
+        - ngettext --version
+        - set FOO=bar
+        - echo $FOO | envsubst | findstr /b bar || exit /b 1
+  - package_contents:
+      files:
+        - bin/libintl-8.dll
+        - bin/libasprintf-0.dll
+        - lib/libintl.dll.a
+        - include/libintl.h
+
+about:
+  homepage: https://www.gnu.org/software/gettext/
+  license: LGPL-2.1-or-later AND GPL-3.0-or-later
+  license_file:
+    - gettext-runtime/intl/COPYING.LIB
+    - gettext-runtime/COPYING
+  summary: GNU gettext runtime, libintl and libasprintf
