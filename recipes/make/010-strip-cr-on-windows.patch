@@ -1,0 +1,24 @@
+Strip the CR of CRLF lines in makefiles on Windows too.
+
+GNU make leaves that to the C runtime's text mode on Windows.  Linked
+with posix-env's binmode.o, make reads makefiles in binary mode, so a
+CRLF line kept its CR and "\" before CRLF was no continuation.  gcc
+writes its -MF dependency files with CRLF, so automake's dependency
+style check failed and builds fell back to depmode=none (no header
+dependencies).
+
+--- a/src/read.c
++++ b/src/read.c
+@@ -2699,9 +2699,10 @@
+       /* We got a newline, so add one to the count of lines.  */
+       ++nlines;
+ 
+-#if !defined(WINDOWS32) && !defined(__MSDOS__) && !defined(__EMX__)
++#if !defined(__MSDOS__) && !defined(__EMX__)
+       /* Check to see if the line was really ended with CRLF; if so ignore
+-         the CR.  */
++         the CR.  On Windows too: makefiles are read in binary mode when
++         make is linked that way.  */
+       if ((p - start) > 1 && p[-2] == '\r')
+         {
+           --p;

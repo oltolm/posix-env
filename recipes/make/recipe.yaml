@@ -22,9 +22,11 @@ source:
     - 008-follow-symlinks-in-name_mtime.patch
     # Message catalogs follow the installation.
     - 009-relocate-localedir.patch
+    # Binary I/O kept the CR of CRLF makefile lines (gcc's -MF files).
+    - 010-strip-cr-on-windows.patch
 
 build:
-  number: 4
+  number: 5
   script:
     interpreter: brush
     content:
@@ -51,6 +53,13 @@ tests:
         # Translations are found: German messages.
         - set LC_ALL=de_DE
         - make -f NUL nosuchtarget 2>&1 | findstr /c:"Keine Regel" || exit /b 1
+        - set LC_ALL=
+        # A CRLF makefile (cmd's echo writes CRLF): "\" continues the line
+        # (patch 010).
+        - '>crlf.mk echo all: a \'
+        - '>>crlf.mk echo  b'
+        - '>>crlf.mk echo a b: ; @echo ok $@'
+        - make -f crlf.mk | findstr /b /c:"ok b" || exit /b 1
 
 about:
   homepage: https://www.gnu.org/software/make/
