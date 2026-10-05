@@ -14,7 +14,7 @@ source:
   - path: binmode.c
 
 build:
-  number: 12
+  number: 14
   script:
     interpreter: brush
     content:
@@ -50,6 +50,7 @@ tests:
   - requirements:
       run:
         - autoconf
+        - gettext-runtime
     script:
       interpreter: cmd
       content:
@@ -57,6 +58,8 @@ tests:
         - sh -c "echo a b | awk '{ print $2 }' | grep -q b" || exit /b 1
         - sh -c "printf 'x\n' | sed s/x/y/ | tr y z | grep -qx z" || exit /b 1
         - sh -c "test -n \"$CONFIG_SITE\" && test -f \"$CONFIG_SITE\"" || exit /b 1
+        # Read again by a nested configure, config.site adds nothing twice.
+        - sh -c ". \"$CONFIG_SITE\"; l=$LDFLAGS c=$CPPFLAGS; . \"$CONFIG_SITE\"; test \"$l\" = \"$LDFLAGS\" && test \"$c\" = \"$CPPFLAGS\"" || exit /b 1
         # Programs that configure links get the UTF-8 manifest.
         - echo AC_INIT([t],[1])> configure.ac
         - echo AC_PROG_CC>> configure.ac
@@ -70,6 +73,14 @@ tests:
         - echo AC_RUN_IFELSE([AC_LANG_PROGRAM([[#include ^<io.h^>>> configure.ac
         - 'echo #include ^<fcntl.h^>]],>> configure.ac'
         - echo [[return _setmode (1, _O_BINARY) != _O_BINARY;]])], [], [AC_MSG_ERROR([stdout not binary])])>> configure.ac
+        # ... and with <libintl.h>, still the C runtime's setlocale: C is
+        # single-byte (libintl_setlocale makes it English UTF-8).
+        - echo LIBS="$LIBS -lintl">> configure.ac
+        - echo AC_RUN_IFELSE([AC_LANG_PROGRAM([[#include ^<libintl.h^>>> configure.ac
+        - 'echo #include ^<locale.h^>>> configure.ac'
+        - 'echo #include ^<stdlib.h^>>> configure.ac'
+        - 'echo #include ^<string.h^>]],>> configure.ac'
+        - echo [[return strcmp (setlocale (LC_ALL, "C"), "C") ^|^| MB_CUR_MAX != 1;]])], [], [AC_MSG_ERROR([libintl replaces setlocale])])>> configure.ac
         - echo AC_OUTPUT>> configure.ac
         - autoconf || exit /b 1
         - sh ./configure || exit /b 1

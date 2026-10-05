@@ -30,13 +30,23 @@ test -n "$build_alias" || build_alias=$(uname -m)-w64-mingw32
 : ${lt_cv_deplibs_check_method='file_magic file format (pei*-i386(.*architecture: i386)?|pe-arm-wince|pei?-x86-64)'}
 : ${lt_cv_file_magic_cmd='$OBJDUMP -f'}
 
+# Each addition below is made once: nested configures (binutils, gcc,
+# gettext) inherit LDFLAGS and CPPFLAGS from their parent and read this file
+# again, and an object linked twice fails ("multiple definition", ".rsrc
+# merge failure").
+
 # Every program gets a manifest that makes UTF-8 its active code page.  It
 # replaces mingw-w64's default manifest; -Wl, keeps libtool from treating the
 # object as one of the package's own.  A package whose programs embed their
 # own manifest sets posix_env_manifest=no and adds activeCodePage to it.
-if test "${posix_env_manifest-yes}" != no; then
-  LDFLAGS="$LDFLAGS -Wl,$posix_env_lib/utf8-manifest.o"
-fi
+case " $LDFLAGS " in
+*/utf8-manifest.o*) ;;
+*)
+  if test "${posix_env_manifest-yes}" != no; then
+    LDFLAGS="$LDFLAGS -Wl,$posix_env_lib/utf8-manifest.o"
+  fi
+  ;;
+esac
 
 # The UCRT's setlocale (CATEGORY, "") follows the Windows settings (decimal
 # comma, local month names), not LC_ALL, LC_<CATEGORY> and LANG, and it
@@ -47,12 +57,28 @@ fi
 # follows it: libtool links C++ libraries with -nostdlib and puts the runtime
 # libraries before these flags.  DLLs must not export its pointers, or
 # programs linked against them would bind to those.
-LDFLAGS="$LDFLAGS -Wl,--wrap=__imp_setlocale -Wl,--wrap=__imp__wsetlocale -Wl,$posix_env_lib/c-locale.o,-lmsvcrt -Wl,--exclude-symbols=__wrap___imp_setlocale -Wl,--exclude-symbols=__wrap___imp__wsetlocale"
+case " $LDFLAGS " in
+*/c-locale.o*) ;;
+*) LDFLAGS="$LDFLAGS -Wl,--wrap=__imp_setlocale -Wl,--wrap=__imp__wsetlocale -Wl,$posix_env_lib/c-locale.o,-lmsvcrt -Wl,--exclude-symbols=__wrap___imp_setlocale -Wl,--exclude-symbols=__wrap___imp__wsetlocale" ;;
+esac
+
+# <libintl.h> redirects setlocale to libintl_setlocale on Windows, which in
+# a UTF-8 process takes "C" as "English_United States.65001": LC_ALL=C
+# would give multibyte characters.  Keep the C runtime's setlocale, which
+# c-locale.o handles; libintl finds the message locale in LC_ALL,
+# LC_MESSAGES and LANG itself.
+case " $CPPFLAGS " in
+*" -D_INTL_NO_DEFINE_MACRO_SETLOCALE "*) ;;
+*) CPPFLAGS="$CPPFLAGS -D_INTL_NO_DEFINE_MACRO_SETLOCALE" ;;
+esac
 
 # Programs read and write bytes, as on POSIX systems: binmode.o puts
 # stdin, stdout, stderr and the files a program opens in binary mode (the
 # UCRT's text mode writes CRLF and drops CR).  It acts only in programs, not
 # in DLLs.  Its libraries follow it for the same reason as c-locale.o's.
-LDFLAGS="$LDFLAGS -Wl,$posix_env_lib/binmode.o,-lmsvcrt,-lkernel32"
+case " $LDFLAGS " in
+*/binmode.o*) ;;
+*) LDFLAGS="$LDFLAGS -Wl,$posix_env_lib/binmode.o,-lmsvcrt,-lkernel32" ;;
+esac
 
 unset posix_env_bin posix_env_lib
