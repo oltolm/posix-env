@@ -3,6 +3,10 @@ rem Opens a POSIX shell (brush) in the posix-env environment, creating the
 rem environment on first use.  Double-click it, or run it from cmd; any
 rem arguments go to sh (posix-shell -c "make").
 rem
+rem   posix-shell update   updates every package to the newest build in the
+rem                        local channel and adds default packages that are
+rem                        missing, then exits
+rem
 rem   POSIX_ENV_HOME       the environment (default %USERPROFILE%\posix-env)
 rem   POSIX_ENV_TOOLCHAIN  the compiler's bin directory, put on PATH
 rem                        (default C:\msys64\ucrt64\bin)
@@ -13,12 +17,22 @@ if not defined POSIX_ENV_TOOLCHAIN set "POSIX_ENV_TOOLCHAIN=C:\msys64\ucrt64\bin
 set "CHANNEL=%TOOLS%..\output"
 for %%i in ("%CHANNEL%") do set "CHANNEL=file:///%%~fi"
 set "CHANNEL=%CHANNEL:\=/%"
+set PACKAGES=posix-env autoconf automake libtool gettext-tools pkgconf ^
+  diffutils patch gzip libarchive xz zstd
 
 if not exist "%POSIX_ENV_HOME%\conda-meta" (
   echo Creating the environment in %POSIX_ENV_HOME% ...
   "%TOOLS%micromamba.exe" create -y -q -p "%POSIX_ENV_HOME%" -c "%CHANNEL%" --override-channels ^
-    posix-env autoconf automake libtool gettext-tools pkgconf ^
-    diffutils patch gzip libarchive xz zstd || (pause & exit /b 1)
+    %PACKAGES% || (pause & exit /b 1)
+)
+
+if /i "%~1"=="update" (
+  echo Updating the environment in %POSIX_ENV_HOME% ...
+  "%TOOLS%micromamba.exe" install -y -q -p "%POSIX_ENV_HOME%" -c "%CHANNEL%" --override-channels ^
+    %PACKAGES% || exit /b 1
+  "%TOOLS%micromamba.exe" update --all -y -q -p "%POSIX_ENV_HOME%" -c "%CHANNEL%" --override-channels || exit /b 1
+  echo Restart open POSIX shells to use the updated packages.
+  exit /b 0
 )
 
 rem A Start menu entry and a Windows Terminal profile, both "POSIX Shell",
