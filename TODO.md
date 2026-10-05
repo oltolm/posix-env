@@ -10,18 +10,6 @@
 * [x] Rust tools (uutils, brush) need no manifest (std uses the wide APIs and `WriteConsoleW`). Checked 2026-10-05: coreutils' `sort`, `ls`, number and date formatting read `LC_ALL`/`LC_<CATEGORY>`/`LANG` themselves (ICU4X); without any of them the Windows build falls back to the UI language, not `C` (activation sets `LANG`). Messages read `LANG` only, English only embedded. sed reads `LC_ALL`/`LC_CTYPE`/`LANG` for byte vs UTF-8 mode (default `C`); grep, findutils, brush ignore the locale.
 * [x] uutils patch 0002 (`C:\src\uutils-coreutils` `windows-native` e799c6bb8): `dd conv=lcase/ucase` called `setlocale(LC_CTYPE, "")` (the only `setlocale` on Windows; `date`'s and `sort`'s are Unix-only), which the UCRT takes as the Windows locale; with code page 1252 it case-mapped UTF-8 lead bytes (`É` became `0xE3 0x89`). Now no `setlocale` on Windows: ASCII only, as glibc in a UTF-8 locale. Unit test plus recipe test.
 
-## UTF-8 by default, binary I/O, locale
-
-* [x] gawk
-* [x] make
-* [x] flex, bison
-* [x] m4
-* [x] perl
-* [ ] binutils
-* [x] diffutils
-* [x] GNU gzip
-* [ ] GCC
-
 ## Missing tools
 
 - [x] GNU gzip 1.15: built with `GNU_STANDARD=0`, so `gunzip`, `zcat`, `uncompress` are copies of `gzip.exe` (no sh needed); `zgrep` etc. via scriptexe, build-env paths rewritten.
@@ -81,11 +69,11 @@ in a local channel only; no package from any conda channel. The toolchain
 - [ ] Configure speed (profile of m4's configure, 113 s): gcc 44 % (79 ms per compile+link; external toolchain), uutils `rm`/`cat`/`mv` 27 % (10 ms each, 3.4 ms above the 6.8 ms process floor; the 13 MB multicall `coreutils.exe` or uucore's startup work: a single-utility build would tell), config.status 17 % (not traced inside), brush < 3 %. No preseeding, no lld.
 - [x] automake 0002: the same exit-status fix as autoconf's 006, in `Automake/FileUtils.pm` (its `General.pm` has no wait macros). `aclocal --install --diff` died on any difference (diff exits 1). Test: `handle_exec_errors` reports and propagates status 3.
 - [x] gettext-tools 1.0 (whole tree built, tools part installed): libtextstyle with GNU termcap (`gl_cv_terminfo=no gl_cv_termcap=libtermcap`; it had picked up MSYS2's libncurses), archive format pinned to xz (`--with-xz`, xz in `build:`), patch 0005 lets autopoint hand the archive to tar (bsdtar, run dependency libarchive). Test runs autopoint on a configure.ac with `AM_GNU_GETTEXT`. uutils has no `id` on Windows; configure only warns.
-- [ ] uutils `env` cannot start a `#!` script (Windows reports "not a valid Win32 application"); libtool's inline-source needed `env ... sh SCRIPT`. Teach env (or a scriptexe-like fallback) to run scripts through their interpreter.
-- [x] MSYS2-era packages removed from `C:\msys64\ucrt64` (2026-10-05: brush, m4, make, scriptexe, uutils-*, winflexbison and their `lib\posix-env`). perl and gawk had used its `mingw32-make.exe`; both now run our `make` (perl build 6 also records `make`, not `mingw32-make`, as `$Config{make}` for module builds). Left over: `ucrt64\lib\posix-env\bin\code.exe` (unowned launcher, 2026-10-03).
+- [x] uutils patch 0003 (`C:\src\uutils-coreutils` `windows-native` ff1fd3fc1): `env` runs `#!` scripts through their interpreter, as brush does (by path, or found in `PATH`; interpreter by file name in `PATH`, `#!/usr/bin/env NAME`); Windows had reported "not a valid Win32 application". Unit and integration tests, recipe test; uutils-coreutils build 4. libtool's 0015 still runs inline-source as `env ... sh SCRIPT`, which is now unnecessary but harmless.
+- [x] MSYS2-era packages removed from `C:\msys64\ucrt64` (2026-10-05: brush, m4, make, scriptexe, uutils-*, winflexbison and their `lib\posix-env`). perl and gawk had used its `mingw32-make.exe`; both now run our `make` (perl build 6 also records `make`, not `mingw32-make`, as `$Config{make}` for module builds). The unowned leftover `ucrt64\lib\posix-env\bin\code.exe` is gone too.
 - [ ] Choose the external toolchain and how the environment finds it (now `POSIX_ENV_TOOLCHAIN`, default `C:\msys64\ucrt64\bin`).
 - [x] Interactive launcher: `tools\posix-shell.cmd` (creates `%USERPROFILE%\posix-env` on first use, puts the toolchain on PATH, `micromamba run … sh`) and `tools\posix-shell-entries.ps1` (Start menu shortcut and Windows Terminal profile fragment "POSIX Shell", created by posix-shell.cmd when missing; `-Remove`). Installation is per user only (decided 2026-10-05).
-- [ ] Rewrite the environment doc for conda packaging.
+- [x] Rewrite the environment doc for conda packaging (2026-10-05: `docs/posix-env.md`, replacing the MSYS2 proposal).
 - [x] Retire `C:\nativetools` (2026-10-05): TODO.md and the design doc moved here; the MSYS2-era launcher and packaging scripts deleted.
 - [x] brush patch 0023: `esac` is no case pattern without `(` (POSIX rule 4); `(case x in x) …;; esac)` failed (automake install hooks, gzip). Parser test added.
 - [x] brush patch 0024: `$(case x in x) …;; esac)` ended at the pattern's `)`. The tokenizer now follows `case … in … esac` in command substitutions, as bash does (reserved words only at a command's start; `(`/`)` around patterns not counted). Tokenizer tests (nested case, `(pat)`, `esac` as pattern, here-doc on the line), recipe test.
