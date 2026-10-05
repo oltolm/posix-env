@@ -7,7 +7,8 @@
 * [x] Binary I/O for all C programs: posix-env ships `lib/posix-env/binmode.o` (constructor: `_fmode`, stdin/stdout/stderr binary; only in the exe, not when linked into a DLL), config.site links it (with `-lmsvcrt,-lkernel32` after it); hand-wired in gawk, winflexbison, lz4, zstd (their own `binmode-std.c` is gone). All C packages rebuilt and tested.
 * [x] perl patch 020: default PerlIO layer `:perlio` instead of `:crlf` (binary I/O like the other tools; `binmode(FH, ":crlf")` still available).
 * [x] Locale names other than the C ones are not overridden (the user's choice); builds set `LC_ALL=C` anyway. The external gcc/cc1 keep the UCRT's default until the toolchain is ours.
-* [ ] Rust tools (uutils, brush) need no manifest; uutils coreutils imports `setlocale`: check what for.
+* [x] Rust tools (uutils, brush) need no manifest (std uses the wide APIs and `WriteConsoleW`). Checked 2026-10-05: coreutils' `sort`, `ls`, number and date formatting read `LC_ALL`/`LC_<CATEGORY>`/`LANG` themselves (ICU4X); without any of them the Windows build falls back to the UI language, not `C` (activation sets `LANG`). Messages read `LANG` only, English only embedded. sed reads `LC_ALL`/`LC_CTYPE`/`LANG` for byte vs UTF-8 mode (default `C`); grep, findutils, brush ignore the locale.
+* [ ] uutils `dd conv=lcase/ucase` calls `setlocale(LC_CTYPE, "")` (the only `setlocale` on Windows; `date`'s and `sort`'s are Unix-only), which the UCRT takes as the Windows locale: with code page 1252 it case-maps bytes 0xC0-0xDE and corrupts UTF-8. Patch: no `setlocale` on Windows (ASCII-only tables).
 
 ## UTF-8 by default, binary I/O
 
