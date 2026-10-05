@@ -38,7 +38,7 @@ source:
     - 021-perlglob-manifest.patch
 
 build:
-  number: 5
+  number: 6
   script: build.bat
 
 requirements:
@@ -63,6 +63,8 @@ tests:
         - set LANG=
         - 'perl -MPOSIX -e "exit(setlocale(LC_ALL) eq q{C} ? 0 : 1)" || exit /b 1'
         - 'perl -MConfig -e "exit(qq{$Config{ld} $Config{libs}} =~ /wrap|c-locale/ ? 1 : 0)" || exit /b 1'
+        # Modules are built with our make, not MinGW's mingw32-make.
+        - 'perl -MConfig -e "exit($Config{make} eq q{make} ? 0 : 1)" || exit /b 1'
         # Binary I/O: "\n" is one byte on stdout and in files.
         - perl -e "print qq{a\n}" > o.txt
         - perl -e "open my $f, q{>}, q{f.txt} or die; print $f qq{b\n}; close $f"

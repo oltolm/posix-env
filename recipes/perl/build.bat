@@ -1,6 +1,6 @@
 @rem Builds perl with win32\GNUmakefile under cmd.exe, as README.win32 and
 @rem MSYS2 do.  SHELL is passed explicitly: the build environment has sh.exe
-@rem in PATH and SHELL set, which mingw32-make would otherwise use.  The
+@rem in PATH and SHELL set, which make would otherwise use.  The
 @rem runtime (libgcc, libstdc++, winpthread) is linked statically: the
 @rem toolchain's DLLs are not part of any environment.
 @rem posix-env activation turned PREFIX into C:/...; conda relocates the
@@ -18,8 +18,8 @@ set "LIBC=%BUILD_PREFIX%/lib/posix-env/c-locale.o"
 @rem (patch 021).
 set "PERLGLOB_RES=%BUILD_PREFIX%/lib/posix-env/utf8-manifest.o"
 cd win32 || exit /b 1
-mingw32-make -j%NUMBER_OF_PROCESSORS% CCTYPE=GCC GCCBIN=gcc CC=gcc "LINK32=%LINK32%" "LIBC=%LIBC%" "PERLGLOB_RES=%PERLGLOB_RES%" CCHOME="%CCHOME%" INST_DRV=%WPREFIX:~0,2% INST_TOP="%WPREFIX%" INST_DOC="%WPREFIX%" USE_64_BIT_INT=define USE_MINGW_ANSI_STDIO=define SHELL=%COMSPEC% PLMAKE=mingw32-make || exit /b 1
-mingw32-make CCTYPE=GCC GCCBIN=gcc CC=gcc "LINK32=%LINK32%" "LIBC=%LIBC%" "PERLGLOB_RES=%PERLGLOB_RES%" CCHOME="%CCHOME%" INST_DRV=%WPREFIX:~0,2% INST_TOP="%WPREFIX%" INST_DOC="%WPREFIX%" USE_64_BIT_INT=define USE_MINGW_ANSI_STDIO=define SHELL=%COMSPEC% PLMAKE=mingw32-make install || exit /b 1
+make -j%NUMBER_OF_PROCESSORS% CCTYPE=GCC GCCBIN=gcc CC=gcc "LINK32=%LINK32%" "LIBC=%LIBC%" "PERLGLOB_RES=%PERLGLOB_RES%" CCHOME="%CCHOME%" INST_DRV=%WPREFIX:~0,2% INST_TOP="%WPREFIX%" INST_DOC="%WPREFIX%" USE_64_BIT_INT=define USE_MINGW_ANSI_STDIO=define SHELL=%COMSPEC% PLMAKE=make || exit /b 1
+make CCTYPE=GCC GCCBIN=gcc CC=gcc "LINK32=%LINK32%" "LIBC=%LIBC%" "PERLGLOB_RES=%PERLGLOB_RES%" CCHOME="%CCHOME%" INST_DRV=%WPREFIX:~0,2% INST_TOP="%WPREFIX%" INST_DOC="%WPREFIX%" USE_64_BIT_INT=define USE_MINGW_ANSI_STDIO=define SHELL=%COMSPEC% PLMAKE=make install || exit /b 1
 cd /d "%WPREFIX%" || exit /b 1
 @rem Config.pm and CORE\config.h spell the prefix with doubled backslashes,
 @rem which conda does not relocate; give them the single-backslash form,
