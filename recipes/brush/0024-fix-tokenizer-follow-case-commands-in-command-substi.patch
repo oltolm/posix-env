@@ -1,0 +1,224 @@
+From df0166ba4701bb68df31e6476dc21c80fd25229c Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Mon, 5 Oct 2026 18:14:29 +0200
+Subject: [PATCH] fix(tokenizer): follow case commands in command substitutions
+
+In `$(case x in x) echo a;; esac)`, the `)` ending the case item's
+pattern was taken for the one closing the substitution, since it pairs
+with no `(`.  As bash does while scanning a command substitution, follow
+the `case` commands in its contents: `case` and `esac` where they are
+reserved words, `in`, and the patterns, whose `(` and `)` delimit them
+rather than pair with each other.  Every token passes through
+delimit_current_token once, in order, so the tracking is fed from there.
+---
+ brush-parser/src/tokenizer.rs | 166 ++++++++++++++++++++++++++++++++++
+ 1 file changed, 166 insertions(+)
+
+diff --git a/brush-parser/src/tokenizer.rs b/brush-parser/src/tokenizer.rs
+index c9e66e18..7f486b52 100644
+--- a/brush-parser/src/tokenizer.rs
++++ b/brush-parser/src/tokenizer.rs
+@@ -330,6 +330,123 @@ struct ExpansionFrame {
+     /// arithmetic expansion's contents, `<<` is always a shift; see
+     /// [`NestedExpansion::is_arithmetic`].)
+     arithmetic_command_parens: usize,
++    /// The `case` commands open in a command substitution's contents, whose patterns end
++    /// with a `)` of their own.
++    cases: CaseTracker,
++}
++
++/// Where a `case` command in a command substitution's contents is being read.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++enum CasePhase {
++    /// After `case`, expecting the word to match.
++    Word,
++    /// After the word, expecting `in`.
++    In,
++    /// Expecting a case item: its patterns (perhaps after a `(`), or `esac`.
++    ItemStart,
++    /// In a case item's patterns, through the `)` that ends them.
++    Patterns,
++    /// In a case item's commands, through `;;`, `;&`, `;;&` or `esac`.
++    Commands,
++}
++
++/// Follows the `case` commands in a command substitution's contents, as bash does while
++/// scanning one, so that the `)` ending a case item's patterns (as in
++/// `$(case x in x) echo;; esac)`) isn't taken for the one closing the substitution. Fed every
++/// token of the contents in order; `case` and `esac` are reserved words only where a command
++/// starts (or, for `esac`, in place of a case item's patterns).
++#[derive(Clone, Debug, Default)]
++struct CaseTracker {
++    /// The phase of each open `case` command, innermost last.
++    open: Vec<CasePhase>,
++    /// Whether the last token leaves the next word in the middle of a command, rather than
++    /// at its start.
++    mid_command: bool,
++}
++
++impl CaseTracker {
++    /// Returns whether a case item's patterns are being read, where `(` and `)` delimit
++    /// them rather than pair with each other.
++    fn in_patterns(&self) -> bool {
++        matches!(
++            self.open.last(),
++            Some(CasePhase::ItemStart | CasePhase::Patterns)
++        )
++    }
++
++    /// Notes the next token of the contents. Blanks, kept in tokens there, don't count.
++    fn note_token(&mut self, token: &str, is_operator: bool) {
++        let token = token.trim_matches(is_blank);
++        if token.is_empty() {
++            return;
++        }
++        let is_word = |word: &str| !is_operator && token == word;
++        let at_command_start = !self.mid_command;
++
++        match self.open.last_mut() {
++            Some(phase @ CasePhase::Word) => {
++                *phase = CasePhase::In;
++                return;
++            }
++            Some(phase @ CasePhase::In) => {
++                if is_word("in") {
++                    *phase = CasePhase::ItemStart;
++                }
++                return;
++            }
++            Some(phase @ CasePhase::ItemStart) => {
++                if token == "\n" {
++                } else if is_word("esac") {
++                    self.open.pop();
++                    self.mid_command = true;
++                } else if is_operator && token == ")" {
++                    *phase = CasePhase::Commands;
++                    self.mid_command = false;
++                } else {
++                    *phase = CasePhase::Patterns;
++                }
++                return;
++            }
++            Some(phase @ CasePhase::Patterns) => {
++                if is_operator && token == ")" {
++                    *phase = CasePhase::Commands;
++                    self.mid_command = false;
++                }
++                return;
++            }
++            Some(phase @ CasePhase::Commands) => {
++                if is_operator && matches!(token, ";;" | ";&" | ";;&") {
++                    *phase = CasePhase::ItemStart;
++                    return;
++                }
++                if at_command_start && is_word("esac") {
++                    self.open.pop();
++                    self.mid_command = true;
++                    return;
++                }
++            }
++            None => (),
++        }
++
++        if at_command_start && is_word("case") {
++            self.open.push(CasePhase::Word);
++            return;
++        }
++
++        // A control operator, or a reserved word that a command may follow, leaves the next
++        // word at a command's start; any other token is (or starts) one.
++        self.mid_command = if is_operator {
++            !matches!(
++                token,
++                "\n" | ";" | "&" | "|" | "&&" | "||" | "|&" | "(" | ";;" | ";&" | ";;&"
++            )
++        } else {
++            !matches!(
++                token,
++                "then" | "do" | "else" | "elif" | "if" | "while" | "until" | "!" | "{"
++            )
++        };
++    }
+ }
+ 
+ impl ExpansionFrame {
+@@ -340,6 +457,10 @@ impl ExpansionFrame {
+         let Some(expansion) = self.expansion else {
+             return;
+         };
++        if self.cases.in_patterns() && matches!(c, '(' | ')') {
++            // A case item's patterns end with a `)` of their own, perhaps after a `(`.
++            return;
++        }
+         if expansion.opening_char() == Some(c) {
+             self.closers_needed += 1;
+         } else if expansion.closing_char() == c {
+@@ -506,6 +627,17 @@ impl TokenParseState {
+             }));
+         }
+ 
++        // Every token of a command substitution's contents passes here once, in order (a
++        // here-document's body excepted), whether it's yielded now or held back below.
++        let frame = &mut cross_token_state.frame;
++        if frame.expansion == Some(NestedExpansion::CommandSubstitution)
++            && !matches!(reason, TokenEndReason::HereDocumentBodyEnd)
++        {
++            frame
++                .cases
++                .note_token(self.current_token(), self.token_is_operator);
++        }
++
+         let current_here_state = std::mem::take(&mut cross_token_state.frame.here_state);
+         match current_here_state {
+             HereState::NextTokenIsHereTag { remove_tabs } => {
+@@ -1220,6 +1352,7 @@ impl<'a, R: ?Sized + std::io::BufRead> Tokenizer<'a, R> {
+                 && !state.in_operator()
+                 && closing_char == Some(c)
+                 && self.cross_state.frame.closers_needed == 1
++                && !self.cross_state.frame.cases.in_patterns()
+             {
+                 let reason = if state.started_token() {
+                     TokenEndReason::Other
+@@ -2217,6 +2350,39 @@ HERE2
+             command_substitution_body("echo $(cat <<EOF)) rest\n", &options)?,
+             "echo $(cat <<EOF)"
+         );
++        // A `)` ending a case item's patterns (with or without a `(` before them) doesn't
++        // close the command; `case` and `esac` count only where they're reserved words.
++        assert_eq!(
++            command_substitution_body("case x in x) echo a;; esac) rest", &options)?,
++            "case x in x) echo a;; esac"
++        );
++        assert_eq!(
++            command_substitution_body("case x in (x|y) echo a;; *) b; esac) rest", &options)?,
++            "case x in (x|y) echo a;; *) b; esac"
++        );
++        assert_eq!(
++            command_substitution_body(
++                "case $1 in\n  a) case y in y) :;; esac;;\n  b) (echo) ;;\nesac\necho case) rest",
++                &options
++            )?,
++            "case $1 in\n  a) case y in y) :;; esac;;\n  b) (echo) ;;\nesac\necho case"
++        );
++        assert_eq!(
++            command_substitution_body("case x in esac) rest", &options)?,
++            "case x in esac"
++        );
++        assert_eq!(
++            command_substitution_body("echo case x in x) rest", &options)?,
++            "echo case x in x"
++        );
++        assert_eq!(
++            command_substitution_body("if :; then case x in x) :;; esac; fi) rest", &options)?,
++            "if :; then case x in x) :;; esac; fi"
++        );
++        assert_eq!(
++            command_substitution_body("cat <<E; case x in x) :;; esac\n)\nE\n) rest", &options)?,
++            "cat <<E; case x in x) :;; esac\n)\nE\n"
++        );
+         // A quoted `)` in an extglob closes neither the pattern nor the command.
+         assert_eq!(
+             command_substitution_body(r#"printf "%s" @(")")) rest"#, &options)?,
+-- 
+2.56.0.windows.1
+

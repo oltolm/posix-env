@@ -88,7 +88,7 @@ in a local channel only; no package from any conda channel. The toolchain
 - [ ] Rewrite the environment doc for conda packaging.
 - [x] Retire `C:\nativetools` (2026-10-05): TODO.md and the design doc moved here; the MSYS2-era launcher and packaging scripts deleted.
 - [x] brush patch 0023: `esac` is no case pattern without `(` (POSIX rule 4); `(case x in x) …;; esac)` failed (automake install hooks, gzip). Parser test added.
-- [ ] brush: `$(case x in x) …;; esac)` still fails: `command_substitution_body` ends at the pattern's `)`; the tokenizer needs to track `case … in … esac`.
+- [x] brush patch 0024: `$(case x in x) …;; esac)` ended at the pattern's `)`. The tokenizer now follows `case … in … esac` in command substitutions, as bash does (reserved words only at a command's start; `(`/`)` around patterns not counted). Tokenizer tests (nested case, `(pat)`, `esac` as pattern, here-doc on the line), recipe test.
 - [x] config.site: `ac_cv_path_shell=$CONFIG_SHELL` (gzip's POSIX-shell search looks only in `/bin`-style PATH entries).
 
 ## Encoding and locale
