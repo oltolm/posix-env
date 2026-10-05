@@ -1,0 +1,241 @@
+From ff1fd3fc19bc5c361950e58e7d14399b8b6fdaf4 Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Mon, 5 Oct 2026 21:11:37 +0200
+Subject: [PATCH] env: run #! scripts through their interpreter on Windows
+
+Windows cannot execute scripts itself, so `env VAR=x ./script` failed
+with "not a valid Win32 application" (os error 193); libtool runs its
+helper scripts that way.
+
+When the program cannot be started, read its #! line (the program is a
+path if it has a directory separator, else it is looked up in PATH) and
+run the interpreter with the script and the arguments. POSIX
+interpreter paths such as /bin/sh do not exist on Windows, so the
+interpreter is looked up by file name in PATH; `#!/usr/bin/env NAME`
+names it in its argument. This matches brush's handling.
+
+Assisted-by: Claude Code:claude-opus-5-5
+---
+ src/uu/env/src/env.rs     | 153 +++++++++++++++++++++++++++++++++++++-
+ tests/by-util/test_env.rs |  34 +++++++++
+ 2 files changed, 186 insertions(+), 1 deletion(-)
+
+diff --git a/src/uu/env/src/env.rs b/src/uu/env/src/env.rs
+index 02505edbe..7c2486fad 100644
+--- a/src/uu/env/src/env.rs
++++ b/src/uu/env/src/env.rs
+@@ -922,7 +922,24 @@ impl EnvAppData {
+             let mut cmd = std::process::Command::new(&*prog);
+             cmd.args(args);
+ 
+-            match cmd.status() {
++            let status = match cmd.status() {
++                // Windows cannot run a #! script itself: run its interpreter.
++                #[cfg(windows)]
++                Err(e)
++                    if matches!(
++                        e.kind(),
++                        io::ErrorKind::NotFound | io::ErrorKind::InvalidInput
++                    ) || e.raw_os_error() == Some(ERROR_BAD_EXE_FORMAT) =>
++                {
++                    match script::command(&prog) {
++                        Some(mut cmd) => cmd.args(args).status(),
++                        None => Err(e),
++                    }
++                }
++                status => status,
++            };
++
++            match status {
+                 Ok(exit) if !exit.success() => Err(exit.code().unwrap_or(1).into()),
+                 Err(e)
+                     if matches!(
+@@ -1240,6 +1257,140 @@ pub fn uumain(args: impl uucore::Args) -> UResult<()> {
+     EnvAppData::default().run_env(args)
+ }
+ 
++/// `CreateProcess` fails with this for a file that is no executable.
++#[cfg(windows)]
++const ERROR_BAD_EXE_FORMAT: i32 = 193;
++
++/// Running `#!` scripts on Windows.
++///
++/// Windows cannot execute scripts itself, but programs written for POSIX run
++/// them through `env` (libtool's `env VAR=... SCRIPT`). POSIX interpreter
++/// paths such as `/bin/sh` do not exist on Windows, so only the interpreter's
++/// file name is kept and looked up in `PATH`; `#!/usr/bin/env NAME` names it
++/// in its argument.
++#[cfg(windows)]
++mod script {
++    use std::ffi::{OsStr, OsString};
++    use std::io::{BufRead as _, BufReader, Read as _};
++    use std::path::Path;
++    use std::process::Command;
++
++    /// Returns the command that runs the `#!` script `prog`, if it is one.
++    ///
++    /// `prog` is a path if it contains a directory separator, and is looked
++    /// up in `PATH` otherwise.
++    pub fn command(prog: &OsStr) -> Option<Command> {
++        let (script, interp, arg) = find(prog)?;
++        let mut cmd = Command::new(interp);
++        cmd.args(arg);
++        cmd.arg(script);
++        Some(cmd)
++    }
++
++    fn find(prog: &OsStr) -> Option<(OsString, String, Option<String>)> {
++        let with_interp = |script: OsString| {
++            let (interp, arg) = interpreter(Path::new(&script))?;
++            Some((script, interp, arg))
++        };
++        if prog
++            .as_encoded_bytes()
++            .iter()
++            .any(|&b| b == b'/' || b == b'\\')
++        {
++            return with_interp(prog.to_owned());
++        }
++        // Joined with '/', as the shell spells PATH entries, so that the
++        // script's $0 has no backslashes.
++        let path = std::env::var_os("PATH")?;
++        std::env::split_paths(&path)
++            .filter(|dir| !dir.as_os_str().is_empty())
++            .find_map(|dir| {
++                let mut script = dir.into_os_string();
++                if !script.as_encoded_bytes().ends_with(b"/")
++                    && !script.as_encoded_bytes().ends_with(b"\\")
++                {
++                    script.push("/");
++                }
++                script.push(prog);
++                with_interp(script)
++            })
++    }
++
++    /// Returns the interpreter's file name and its optional argument for the
++    /// `#!` script `path`.
++    pub fn interpreter(path: &Path) -> Option<(String, Option<String>)> {
++        if !path.is_file() {
++            return None;
++        }
++        let mut line = Vec::new();
++        BufReader::new(std::fs::File::open(path).ok()?)
++            .take(4096)
++            .read_until(b'\n', &mut line)
++            .ok()?;
++        let line = String::from_utf8_lossy(line.strip_prefix(b"#!")?);
++        let (interp, arg) = split_word(line.trim());
++        let name = interp.rsplit(['/', '\\']).next().unwrap_or(interp);
++        match arg {
++            Some(arg) if name == "env" => {
++                let arg = arg.strip_prefix("-S").map_or(arg, str::trim_start);
++                let (name, rest) = split_word(arg);
++                Some((name.to_string(), rest.map(str::to_string)))
++            }
++            _ => Some((name.to_string(), arg.map(str::to_string))),
++        }
++    }
++
++    /// Splits off the first word; the rest, if any, is one argument.
++    fn split_word(s: &str) -> (&str, Option<&str>) {
++        match s.split_once([' ', '\t']) {
++            Some((word, rest)) if !rest.trim().is_empty() => (word, Some(rest.trim())),
++            _ => (s.trim(), None),
++        }
++    }
++
++    #[cfg(test)]
++    mod tests {
++        use super::interpreter;
++
++        fn script(contents: &str) -> Option<(String, Option<String>)> {
++            use std::sync::atomic::{AtomicUsize, Ordering};
++            static N: AtomicUsize = AtomicUsize::new(0);
++            let path = std::env::temp_dir().join(format!(
++                "uu-env-script-{}-{}",
++                std::process::id(),
++                N.fetch_add(1, Ordering::Relaxed)
++            ));
++            std::fs::write(&path, contents).unwrap();
++            let result = interpreter(&path);
++            std::fs::remove_file(&path).unwrap();
++            result
++        }
++
++        #[test]
++        fn keeps_file_name_and_argument() {
++            assert_eq!(script("#!/bin/sh\necho hi\n"), Some(("sh".into(), None)));
++            assert_eq!(
++                script("#! /bin/bash -e\r\n"),
++                Some(("bash".into(), Some("-e".into())))
++            );
++            assert_eq!(
++                script("#!/usr/bin/env perl -w\n"),
++                Some(("perl".into(), Some("-w".into())))
++            );
++            assert_eq!(
++                script("#!/usr/bin/env -S perl\n"),
++                Some(("perl".into(), None))
++            );
++        }
++
++        #[test]
++        fn ignores_other_files() {
++            assert_eq!(script("plain text\n"), None);
++            assert_eq!(script(""), None);
++        }
++    }
++}
++
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+diff --git a/tests/by-util/test_env.rs b/tests/by-util/test_env.rs
+index e550450aa..b05a09e96 100644
+--- a/tests/by-util/test_env.rs
++++ b/tests/by-util/test_env.rs
+@@ -179,6 +179,40 @@ fn test_if_windows_batch_files_can_be_executed() {
+     assert!(result.stdout_str().contains("Hello Windows World!"));
+ }
+ 
++/// Windows cannot run `#!` scripts; env runs their interpreter, looked up by
++/// file name in PATH, with the script and its arguments.
++#[cfg(all(windows, feature = "echo"))]
++#[test]
++fn test_shebang_scripts_run_through_their_interpreter() {
++    let ts = TestScenario::new(util_name!());
++    let at = &ts.fixtures;
++    let bin_dir = ts.bin_path.parent().unwrap().to_str().unwrap().to_string();
++    at.write("by-path", "#!/usr/local/bin/coreutils echo\r\n");
++    at.mkdir("dir");
++    at.write("dir/in-path", "#!/usr/bin/env coreutils echo\n");
++    let path = format!("{bin_dir};{}", at.plus_as_string("dir"));
++
++    ts.ucmd()
++        .env("PATH", &path)
++        .args(&["./by-path", "a b"])
++        .succeeds()
++        .stdout_only("./by-path a b\n");
++    let out = ts
++        .ucmd()
++        .env("PATH", &path)
++        .args(&["in-path", "x"])
++        .succeeds()
++        .stdout_move_str();
++    assert!(out.ends_with("dir/in-path x\n"), "{out:?}");
++
++    // Not a script: found, but cannot be invoked.
++    at.write("text", "plain\n");
++    ts.ucmd()
++        .env("PATH", &path)
++        .arg("./text")
++        .fails_with_code(126);
++}
++
+ #[cfg(feature = "echo")]
+ #[test]
+ fn test_debug_1() {
+-- 
+2.56.0.windows.1
+

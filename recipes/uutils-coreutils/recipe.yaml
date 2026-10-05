@@ -13,9 +13,11 @@ source:
     - 0001-ln-store-symlink-targets-with-backslashes-on-Windows.patch
     # dd conv=lcase/ucase took the Windows locale and mapped UTF-8 lead bytes.
     - 0002-dd-no-setlocale-for-conv-lcase-ucase-on-Windows.patch
+    # env could not start #! scripts (libtool runs its helpers through env).
+    - 0003-env-run-scripts-through-their-interpreter-on-Windows.patch
 
 build:
-  number: 3
+  number: 4
   script:
     interpreter: brush
     file: build.sh
@@ -35,6 +37,12 @@ tests:
         - if not exist "%PREFIX%\bin\[.exe" exit /b 1
         # dd maps ASCII only: the UTF-8 bytes of É stay (patch 0002).
         - printf \303\211A\n | dd conv=lcase status=none | od -An -tx1 | findstr /c:"c3 89 61 0a" || exit /b 1
+        # env runs #! scripts through their interpreter, by path or found in
+        # PATH (patch 0003).
+        - 'echo #!/usr/bin/env coreutils echo> script'
+        - env ./script a | findstr /b /c:"./script a" || exit /b 1
+        - set "PATH=%CD%;%PATH%"
+        - env script b | findstr /c:"/script b" || exit /b 1
 
 about:
   homepage: https://github.com/uutils/coreutils
