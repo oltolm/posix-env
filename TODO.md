@@ -17,6 +17,7 @@
 - [x] `unzstd`, `zstdcat` (and `zstdmt`) in the zstd package: copies of `zstd.exe`, tested.
 - [ ] Port the real flex release (native MinGW, gnulib where needed), replacing winflexbison's `flex`/`lex`.
 - [ ] Port the real GNU bison release (native MinGW, gnulib where needed), replacing winflexbison's `bison`/`yacc`.
+- [ ] Port GNU findutils.
 
 ## posix-env packaging (conda format, no MSYS)
 
@@ -49,7 +50,7 @@ in a local channel only; no package from any conda channel. The toolchain
 - [x] Compiled-in prefix paths: conda relocates text files only on Windows. gawk (AWKPATH/AWKLIBPATH), make and m4 (LOCALEDIR) now compute them from the exe location (one small patch each, with tests: `gawk -i join`, German messages); perl rewrites doubled-backslash prefixes in Config.pm/config.h at build time.
 - [x] perl 5.44.0 (MSYS2's 17 patches incl. 3 upstream PRs, regenerated; built under cmd.exe with mingw32-make, fully static runtime).
 - [x] zlib 1.3.2 (win32/Makefile.gcc; minizip not packaged).
-- [ ] Blocked: openssl 3.6.5 (`recipes\openssl`, with MSYS2's relocation patch and arch suffix). Its MinGW Configure requires a perl with Unix paths ("This perl implementation doesn't produce Unix like paths"); native Win32 perl's File::Spec gives backslashes, and the generated Makefile is run by sh. Needs OpenSSL's MinGW build made to work with a native perl. Users: uutils coreutils `--features openssl` (faster md5/sha), libarchive (MSYS2 enables it; ours has CNG only).
+- [ ] Deferred (2026-10-05, not needed now): openssl 3.6.5 (`recipes\openssl`, with MSYS2's relocation patch and arch suffix). Would-be users: uutils coreutils `--features openssl` (only faster md5/sha), libarchive (has CNG), perl's Net::SSLeay/IO::Socket::SSL (HTTPS for cpan); a future curl can use Schannel. Its MinGW Configure requires a perl with Unix paths ("This perl implementation doesn't produce Unix like paths"); native Win32 perl's File::Spec gives backslashes. Tried in a scratch build: a `File::Spec::Win32` subclass that returns `/` (rel2abs, catfile, catdir, catpath, abs2rel, canonpath, tmpdir, ...), installed as `@File::Spec::ISA` and loaded with `PERL5OPT=-MFile::Spec::Slash` (kept as `recipes\openssl\perl\File\Spec\Slash.pm`, not wired in), plus `PERL="$(command -v perl)"` (else `$^X` with backslashes goes into the Makefile): Configure and `make` succeed, `openssl.exe` works. Still open: perlasm's assembler probe passes `/dev/null` to gcc as a file (`-o /dev/null -x assembler /dev/null`), which fails, so AVX code is probably off (use `NUL`); `make install`, the test suite and our two patches untried.
 - [x] perl warned "Setting locale failed" with LC_ALL=C.UTF-8 and pcre2grep failed; both fixed by the locale work (`c-locale.o`, perl's test checks for no warning, pcre2's test no longer clears LC_ALL).
 - [ ] The external toolchain's own include and lib directories (`C:\msys64\ucrt64`) can leak MSYS2 libraries into builds; a dependency missing from `host:` goes unnoticed (gettext-tools' libtextstyle found libncurses there; it now pins termcap). Its `bin` also puts MSYS2's tools on PATH: configure finds `perl`, `msgfmt`, `xgettext`, `texi2pdf`, `xz` there, and gettext-runtime's build runs `help2man` with MSYS2's perl. A toolchain directory with only gcc/binutils would avoid both.
 - [x] Toolchain runtime DLLs are linked statically for now (`-static-libgcc`; gmp's C++ library also gets libtool's `-lstdc++`/`-lpthread` replaced by the static archives, with `lt_cv_deplibs_check_method=pass_all`). No package imports a DLL from the toolchain.
@@ -78,15 +79,16 @@ in a local channel only; no package from any conda channel. The toolchain
 - [x] brush patch 0023: `esac` is no case pattern without `(` (POSIX rule 4); `(case x in x) …;; esac)` failed (automake install hooks, gzip). Parser test added.
 - [x] brush patch 0024: `$(case x in x) …;; esac)` ended at the pattern's `)`. The tokenizer now follows `case … in … esac` in command substitutions, as bash does (reserved words only at a command's start; `(`/`)` around patterns not counted). Tokenizer tests (nested case, `(pat)`, `esac` as pattern, here-doc on the line), recipe test.
 - [x] config.site: `ac_cv_path_shell=$CONFIG_SHELL` (gzip's POSIX-shell search looks only in `/bin`-style PATH entries).
+- [x] gawk port to configure and gnulib (2026-10-05, `C:\src\gawk` branch `mingw-gnulib-2`, worktree `C:\src\gawk-gnulib`; no recipe, the package stays on the 5.4.1 release's pc/ build). The gnulib import committed (without gnulib's `setlocale`, which takes `C` as English UTF-8), LDFLAGS passed once, commands run with `$SHELL -c` (system(), pipes, two-way pipes; cmd.exe only without SHELL), all extensions but fork built, no libwinpthread import (clock_gettime/nanosleep), debugger crash on `?` in command lists, debugger tests outside the source tree. Remaining MinGW test failures are fork, /dev/fd, ptys and signals, plus randtest and readdir below. The packaged gawk still runs commands with cmd.exe.
+- [x] make patch 010 (build 5): strip the CR of CRLF makefile lines on Windows too. With binary I/O, gcc's CRLF `-MF` files broke `\` continuations, and automake's dependency check fell back to `depmode=none` in every build (no header dependencies).
+- [x] posix-env build 13: config.site adds `-D_INTL_NO_DEFINE_MACRO_SETLOCALE`; `<libintl.h>` redirected setlocale to libintl_setlocale, which takes `C` as English UTF-8 (LC_ALL=C gave multibyte characters). Build 14: config.site adds each flag once (nested configures such as binutils' read it again: objects linked twice).
+- [ ] Rebuild the NLS packages (make, m4, xz, gettext-tools, diffutils, ...) with posix-env build 13+, so that LC_ALL=C is single-byte in them too.
+- [ ] brush: a file without `#!` that is not an executable must run as a shell script (POSIX, ENOEXEC); Windows reports error 193 (gawk's randtest).
+- [ ] uutils `ls -i` prints no inode numbers on Windows (the file index is available through GetFileInformationByHandle); gawk's readdir test builds its expected output from it.
+- [x] `tools\posix-shell.cmd update`: updates the environment from the local channel and adds missing default packages.
 
 ## Encoding and locale
 
 - [x] UTF-8 manifests in gawk, m4, make, flex, bison, perl, which, chmod (checked 2026-10-05; see Locale).
 - [x] Native GNU tools honor `LC_ALL`, `LC_*`, `LANG` through `c-locale.o`; activation sets `LANG=C.UTF-8` (see Locale).
 - [x] GNU diffutils 3.12 (cmp, diff, diff3, sdiff), binary standard streams; tested byte for byte.
-
-## Deferred alternatives
-
-- [ ] Port GNU findutils
-- [ ] Port GNU grep
-- [ ] Port GNU sed
