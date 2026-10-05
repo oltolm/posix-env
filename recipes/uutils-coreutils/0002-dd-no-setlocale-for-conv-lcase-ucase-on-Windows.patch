@@ -1,0 +1,84 @@
+From e799c6bb8d33973562c800176169d72e3d01f293 Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Mon, 5 Oct 2026 17:33:51 +0200
+Subject: [PATCH] dd: no setlocale for conv=lcase/ucase on Windows
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The CRT takes setlocale(LC_CTYPE, "") as the Windows locale, not LC_ALL,
+LC_CTYPE or LANG.  With its single-byte code page (1252) tolower and
+toupper map the bytes 0xC0-0xDE and 0xE0-0xFE, which are UTF-8 lead
+bytes: `printf 'É' | dd conv=lcase` gave 0xE3 0x89.
+
+Keep the C locale on Windows, which maps ASCII only, as glibc does in a
+UTF-8 locale.
+---
+ src/uu/dd/src/conversion_tables.rs | 12 ++++++++++--
+ tests/by-util/test_dd.rs           | 20 ++++++++++++++++++++
+ 2 files changed, 30 insertions(+), 2 deletions(-)
+
+diff --git a/src/uu/dd/src/conversion_tables.rs b/src/uu/dd/src/conversion_tables.rs
+index bfb9e568e..7c33bfdc7 100644
+--- a/src/uu/dd/src/conversion_tables.rs
++++ b/src/uu/dd/src/conversion_tables.rs
+@@ -18,7 +18,11 @@ pub fn build_lcase_table() -> ConversionTable {
+     // Initialize locale from environment if not already done
+     // SAFETY: setlocale is called with a valid C string and is used to initialize
+     // the locale for character conversion functions
+-    #[cfg(not(target_os = "wasi"))]
++    // Not on Windows: the CRT takes "" as the Windows locale, not LC_ALL,
++    // LC_CTYPE or LANG, and its single-byte code page (1252) would map the
++    // bytes 0xC0-0xDE, which are UTF-8 lead bytes.  The C locale maps ASCII
++    // only, as glibc does in a UTF-8 locale.
++    #[cfg(not(any(target_os = "wasi", windows)))]
+     unsafe {
+         libc::setlocale(libc::LC_CTYPE, c"".as_ptr())
+     };
+@@ -38,7 +42,11 @@ pub fn build_ucase_table() -> ConversionTable {
+     // Initialize locale from environment if not already done
+     // SAFETY: setlocale is called with a valid C string and is used to initialize
+     // the locale for character conversion functions
+-    #[cfg(not(target_os = "wasi"))]
++    // Not on Windows: the CRT takes "" as the Windows locale, not LC_ALL,
++    // LC_CTYPE or LANG, and its single-byte code page (1252) would map the
++    // bytes 0xC0-0xDE, which are UTF-8 lead bytes.  The C locale maps ASCII
++    // only, as glibc does in a UTF-8 locale.
++    #[cfg(not(any(target_os = "wasi", windows)))]
+     unsafe {
+         libc::setlocale(libc::LC_CTYPE, c"".as_ptr())
+     };
+diff --git a/tests/by-util/test_dd.rs b/tests/by-util/test_dd.rs
+index ea529fb12..ef68ec8a4 100644
+--- a/tests/by-util/test_dd.rs
++++ b/tests/by-util/test_dd.rs
+@@ -2243,6 +2243,26 @@ fn test_iso8859_1_case_conversion() {
+     assert_eq!(result.stdout(), expected);
+ }
+ 
++#[test]
++fn test_utf8_case_conversion_keeps_multibyte() {
++    // Only ASCII is mapped in a UTF-8 locale; the bytes of É (0xC3 0x89)
++    // are left alone.  On Windows the CRT's "" locale is the Windows one,
++    // whose code page 1252 would turn the lead byte 0xC3 into 0xE3.
++    let result = new_ucmd!()
++        .args(&["conv=lcase", "status=none"])
++        .env("LC_ALL", "C.UTF-8")
++        .pipe_in(vec![0xC3, 0x89, b'A', b'\n'])
++        .succeeds();
++    assert_eq!(result.stdout(), [0xC3, 0x89, b'a', b'\n']);
++
++    let result = new_ucmd!()
++        .args(&["conv=ucase", "status=none"])
++        .env("LC_ALL", "C.UTF-8")
++        .pipe_in(vec![0xC3, 0xA9, b'a', b'\n'])
++        .succeeds();
++    assert_eq!(result.stdout(), [0xC3, 0xA9, b'A', b'\n']);
++}
++
+ #[test]
+ fn test_locale_aware_case_conversion() {
+     // Test that case conversion respects different single-byte locales
+-- 
+2.56.0.windows.1
+

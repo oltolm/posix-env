@@ -1,0 +1,22 @@
+Report a failed command's exit status on Win32 perl, whose POSIX module
+has no WIFEXITED and the like ("POSIX::WIFEXITED not implemented on this
+architecture"); its $? is the exit code shifted left by 8.  The same as
+autoconf's 006 for its copy in Autom4te.
+
+diff --git a/lib/Automake/FileUtils.pm b/lib/Automake/FileUtils.pm
+--- a/lib/Automake/FileUtils.pm
++++ b/lib/Automake/FileUtils.pm
+@@ -236,9 +236,11 @@
+     {
+       use POSIX qw (WIFEXITED WEXITSTATUS WIFSIGNALED WTERMSIG);
+ 
+-      if (WIFEXITED ($?))
++      # Win32 perl's POSIX has no wait status macros; its $? is the
++      # exit code shifted left by 8.
++      if ($^O eq 'MSWin32' || WIFEXITED ($?))
+ 	{
+-	  my $status = WEXITSTATUS ($?);
++	  my $status = $^O eq 'MSWin32' ? $? >> 8 : WEXITSTATUS ($?);
+ 	  # Propagate exit codes.
+ 	  fatal ('',
+ 		 "$command failed with exit status: $status",

@@ -14,9 +14,12 @@ for %%i in ("%GCCDIR%..") do set "CCHOME=%%~fi"
 @rem LINK32 links with -static.
 set "LINK32=g++ -static -Wl,--wrap=__imp_setlocale -Wl,--wrap=__imp__wsetlocale"
 set "LIBC=%BUILD_PREFIX%/lib/posix-env/c-locale.o"
+@rem perl.exe has its own manifest (patch 018); perlglob.exe gets posix-env's
+@rem (patch 021).
+set "PERLGLOB_RES=%BUILD_PREFIX%/lib/posix-env/utf8-manifest.o"
 cd win32 || exit /b 1
-mingw32-make -j%NUMBER_OF_PROCESSORS% CCTYPE=GCC GCCBIN=gcc CC=gcc "LINK32=%LINK32%" "LIBC=%LIBC%" CCHOME="%CCHOME%" INST_DRV=%WPREFIX:~0,2% INST_TOP="%WPREFIX%" INST_DOC="%WPREFIX%" USE_64_BIT_INT=define USE_MINGW_ANSI_STDIO=define SHELL=%COMSPEC% PLMAKE=mingw32-make || exit /b 1
-mingw32-make CCTYPE=GCC GCCBIN=gcc CC=gcc "LINK32=%LINK32%" "LIBC=%LIBC%" CCHOME="%CCHOME%" INST_DRV=%WPREFIX:~0,2% INST_TOP="%WPREFIX%" INST_DOC="%WPREFIX%" USE_64_BIT_INT=define USE_MINGW_ANSI_STDIO=define SHELL=%COMSPEC% PLMAKE=mingw32-make install || exit /b 1
+mingw32-make -j%NUMBER_OF_PROCESSORS% CCTYPE=GCC GCCBIN=gcc CC=gcc "LINK32=%LINK32%" "LIBC=%LIBC%" "PERLGLOB_RES=%PERLGLOB_RES%" CCHOME="%CCHOME%" INST_DRV=%WPREFIX:~0,2% INST_TOP="%WPREFIX%" INST_DOC="%WPREFIX%" USE_64_BIT_INT=define USE_MINGW_ANSI_STDIO=define SHELL=%COMSPEC% PLMAKE=mingw32-make || exit /b 1
+mingw32-make CCTYPE=GCC GCCBIN=gcc CC=gcc "LINK32=%LINK32%" "LIBC=%LIBC%" "PERLGLOB_RES=%PERLGLOB_RES%" CCHOME="%CCHOME%" INST_DRV=%WPREFIX:~0,2% INST_TOP="%WPREFIX%" INST_DOC="%WPREFIX%" USE_64_BIT_INT=define USE_MINGW_ANSI_STDIO=define SHELL=%COMSPEC% PLMAKE=mingw32-make install || exit /b 1
 cd /d "%WPREFIX%" || exit /b 1
 @rem Config.pm and CORE\config.h spell the prefix with doubled backslashes,
 @rem which conda does not relocate; give them the single-backslash form,

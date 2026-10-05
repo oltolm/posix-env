@@ -1,0 +1,16 @@
+UTF-8 as the active code page of perlglob.exe, too (see 018): it prints
+the file names the CRT expands from its narrow command line.  The
+GNUmakefile links it with PERLGLOB_RES, which build.bat sets to
+posix-env's manifest object.
+
+--- a/win32/GNUmakefile
++++ b/win32/GNUmakefile
+@@ -1179,7 +1179,7 @@
+ 
+ $(GLOBEXE) : perlglob.c
+ ifeq ($(CCTYPE),GCC)
+-	$(LINK32) $(EXTRACFLAGS) $(OPTIMIZE) $(BLINK_FLAGS) -mconsole -o $@ perlglob.c $(LIBFILES)
++	$(LINK32) $(EXTRACFLAGS) $(OPTIMIZE) $(BLINK_FLAGS) -mconsole -o $@ perlglob.c $(PERLGLOB_RES) $(LIBFILES)
+ else
+ 	$(CC) $(EXTRACFLAGS) $(OPTIMIZE) $(PDBOUT) -Fe$@ perlglob.c -link $(BLINK_FLAGS) \
+ 	setargv$(o) $(LIBFILES)
