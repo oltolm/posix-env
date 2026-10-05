@@ -14,7 +14,7 @@ source:
   - path: binmode.c
 
 build:
-  number: 14
+  number: 17
   script:
     interpreter: brush
     content:
@@ -55,6 +55,8 @@ tests:
       interpreter: cmd
       content:
         - which sh
+        # PATH has none of conda's Windows layout (Library/*, Scripts).
+        - sh -c "case \";$PATH;\" in *\"$POSIX_ENV_PREFIX/Library/\"*|*\"$POSIX_ENV_PREFIX/Scripts;\"*) exit 1;; esac" || exit /b 1
         - sh -c "echo a b | awk '{ print $2 }' | grep -q b" || exit /b 1
         - sh -c "printf 'x\n' | sed s/x/y/ | tr y z | grep -qx z" || exit /b 1
         - sh -c "test -n \"$CONFIG_SITE\" && test -f \"$CONFIG_SITE\"" || exit /b 1
@@ -84,6 +86,16 @@ tests:
         - echo AC_OUTPUT>> configure.ac
         - autoconf || exit /b 1
         - sh ./configure || exit /b 1
+        # Without config.site (gcc's build-machine configures), programs are
+        # still found: ac_executable_extensions comes from the environment.
+        - echo AC_INIT([t],[1])> configure.ac
+        - echo AC_PROG_GREP>> configure.ac
+        - echo AC_PROG_SED>> configure.ac
+        - echo AC_OUTPUT>> configure.ac
+        - autoconf || exit /b 1
+        - sh -c "CONFIG_SITE=no-such-file ./configure" || exit /b 1
+        # ... and they are the environment's own, not the "best" on PATH.
+        - sh -c "grep -qx \"GREP='$POSIX_ENV_PREFIX/bin/grep.exe'\" config.log" || exit /b 1
 
 about:
   license: MIT

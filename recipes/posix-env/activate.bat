@@ -10,12 +10,29 @@
 
 @for %%v in (PATH PREFIX BUILD_PREFIX SRC_DIR RECIPE_DIR CONDA_PREFIX LIBRARY_PREFIX LIBRARY_BIN LIBRARY_INC LIBRARY_LIB SCRIPTS TEMP TMP) do @if defined %%v @call set "%%v=%%%%v:\=/%%"
 
+@rem The prefix is flat (bin, lib, share); micromamba still puts conda's
+@rem Windows layout on PATH, directories that hold nothing here.
+@for %%d in ("Library/mingw-w64/bin" "Library/usr/bin" "Library/bin" "Scripts") do @call set "PATH=%%PATH:%POSIX_ENV_PREFIX%/%%~d;=%%"
+@call set "PATH=%%PATH:%POSIX_ENV_PREFIX%;=%%"
+
 @rem Configure runs /bin/sh, which does not exist, unless told otherwise.
 @set "CONFIG_SHELL=%POSIX_ENV_PREFIX%/bin/sh.exe"
 @set "SHELL=%POSIX_ENV_PREFIX%/bin/sh.exe"
 @rem Autoconf detects ';' only by running /bin/sh, before config.site is read.
 @set "PATH_SEPARATOR=;"
 @set "CONFIG_SITE=%POSIX_ENV_PREFIX%/share/posix-env/config.site"
+@rem Autoconf's program search tries "grep", never "grep.exe", unless told
+@rem to.  In the environment, not only in config.site: configures that run
+@rem without it (gcc's build-machine libraries: CONFIG_SITE=no-such-file)
+@rem would find no program at all.
+@set "ac_executable_extensions=.exe"
+@rem AC_PROG_GREP and AC_PROG_SED search all of PATH for the "best" program
+@rem and can pick another one (Git's, MSYS2's, under "Program Files", where
+@rem the unquoted $GREP breaks).  Without config.site too.
+@set "GREP=%POSIX_ENV_PREFIX%/bin/grep.exe"
+@set "EGREP=%POSIX_ENV_PREFIX%/bin/grep.exe -E"
+@set "FGREP=%POSIX_ENV_PREFIX%/bin/grep.exe -F"
+@set "SED=%POSIX_ENV_PREFIX%/bin/sed.exe"
 @rem Win32 perl hands commands to its shell the way cmd.exe expects them.
 @set "PERL5SHELL=%POSIX_ENV_PREFIX%/bin/perlsh.exe"
 
