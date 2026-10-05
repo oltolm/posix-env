@@ -15,7 +15,7 @@ source:
     - 0002-dd-no-setlocale-for-conv-lcase-ucase-on-Windows.patch
 
 build:
-  number: 2
+  number: 3
   script:
     interpreter: brush
     file: build.sh
