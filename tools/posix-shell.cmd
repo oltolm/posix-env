@@ -59,4 +59,12 @@ if exist "%POSIX_ENV_GIT%\git.exe" set "PATH=%PATH%;%POSIX_ENV_GIT%"
 if defined POSIX_ENV_EXTRA_PATH set "PATH=%PATH%;%POSIX_ENV_EXTRA_PATH%"
 rem Started by double-click: begin in the home directory, not in tools\.
 if /i "%CD%\"=="%TOOLS%" cd /d "%USERPROFILE%"
-"%TOOLS%micromamba.exe" run -p "%POSIX_ENV_HOME%" sh %*
+
+rem Activate the environment here and start sh directly.  micromamba run
+rem switches the console to VT processing without wrapping at the end of
+rem the line for the program it runs (restored only when it exits): make's
+rem long command lines ran off the right edge.
+set "CONDA_PREFIX=%POSIX_ENV_HOME%"
+set "PATH=%POSIX_ENV_HOME%\bin;%PATH%"
+for %%f in ("%POSIX_ENV_HOME%\etc\conda\activate.d\*.bat") do call "%%~f"
+"%POSIX_ENV_HOME%\bin\sh.exe" %*
