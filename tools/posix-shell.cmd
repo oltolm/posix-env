@@ -10,6 +10,14 @@ rem
 rem   POSIX_ENV_HOME       the environment (default %USERPROFILE%\posix-env)
 rem   POSIX_ENV_TOOLCHAIN  the compiler's bin directory, put on PATH
 rem                        (default C:\msys64\ucrt64\bin)
+rem   POSIX_ENV_GIT        a directory with git.exe and nothing else of note
+rem                        (default %ProgramFiles%\Git\cmd)
+rem   POSIX_ENV_EXTRA_PATH more directories for PATH
+rem
+rem The shell's PATH is the environment, the toolchain, System32 and
+rem Windows, git, and POSIX_ENV_EXTRA_PATH: not the Windows PATH, whose
+rem programs (Git's or MSYS2's tools, text-mode ports) would be found by
+rem build scripts.
 setlocal
 set "TOOLS=%~dp0"
 if not defined POSIX_ENV_HOME set "POSIX_ENV_HOME=%USERPROFILE%\posix-env"
@@ -45,7 +53,10 @@ if not exist "%FRAGMENT%" set "ENTRIES="
 if not defined ENTRIES "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "%TOOLS%posix-shell-entries.ps1"
 
 if not exist "%POSIX_ENV_TOOLCHAIN%\gcc.exe" echo Warning: no gcc in %POSIX_ENV_TOOLCHAIN% (set POSIX_ENV_TOOLCHAIN).
-set "PATH=%POSIX_ENV_TOOLCHAIN%;%PATH%"
+if not defined POSIX_ENV_GIT set "POSIX_ENV_GIT=%ProgramFiles%\Git\cmd"
+set "PATH=%POSIX_ENV_TOOLCHAIN%;%SystemRoot%\System32;%SystemRoot%"
+if exist "%POSIX_ENV_GIT%\git.exe" set "PATH=%PATH%;%POSIX_ENV_GIT%"
+if defined POSIX_ENV_EXTRA_PATH set "PATH=%PATH%;%POSIX_ENV_EXTRA_PATH%"
 rem Started by double-click: begin in the home directory, not in tools\.
 if /i "%CD%\"=="%TOOLS%" cd /d "%USERPROFILE%"
 "%TOOLS%micromamba.exe" run -p "%POSIX_ENV_HOME%" sh %*

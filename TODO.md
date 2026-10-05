@@ -86,6 +86,8 @@ in a local channel only; no package from any conda channel. The toolchain
 - [ ] brush: a file without `#!` that is not an executable must run as a shell script (POSIX, ENOEXEC); Windows reports error 193 (gawk's randtest).
 - [ ] uutils `ls -i` prints no inode numbers on Windows (the file index is available through GetFileInformationByHandle); gawk's readdir test builds its expected output from it.
 - [x] `tools\posix-shell.cmd update`: updates the environment from the local channel and adds missing default packages.
+- [x] posix-env builds 15-17 (2026-10-06): activation exports `ac_executable_extensions=.exe`, `GREP`, `EGREP`, `FGREP`, `SED` (gcc runs its build-machine and target configures with `CONFIG_SITE=no-such-file`: "no acceptable grep", then Git's grep under `Program Files`), and drops micromamba's conda-layout PATH entries (`Library\*`, `Scripts`, the prefix). The launcher no longer inherits the Windows PATH: environment, toolchain, System32, Windows, `POSIX_ENV_GIT` (default `%ProgramFiles%\Git\cmd`), `POSIX_ENV_EXTRA_PATH`.
+- [ ] gcc's build tree has `#!/bin/sh` wrappers (`gcc/as`, `gcc/collect-ld`, `gcc/nm`) that Windows cannot start; the built compiler needs `real-ld.exe`/`as.exe` copied next to it.
 
 ## Encoding and locale
 

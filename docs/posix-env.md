@@ -25,6 +25,12 @@ and a Windows Terminal profile, both named "POSIX Shell"
 |---|---|---|
 | `POSIX_ENV_HOME` | the environment | `%USERPROFILE%\posix-env` |
 | `POSIX_ENV_TOOLCHAIN` | the compiler's `bin` directory, put on `PATH` | `C:\msys64\ucrt64\bin` |
+| `POSIX_ENV_GIT` | a directory with `git.exe`, put on `PATH` if it has one | `%ProgramFiles%\Git\cmd` |
+| `POSIX_ENV_EXTRA_PATH` | more directories for `PATH` | none |
+
+The shell's `PATH` is the environment's `bin`, the toolchain, `System32` and
+`Windows`, git, then `POSIX_ENV_EXTRA_PATH`; the Windows `PATH` is not
+inherited, so build scripts find no other `grep`, `sed` or `perl`.
 
 The toolchain (gcc, binutils, mingw-w64) is not packaged. Any MinGW-w64 UCRT
 toolchain works; MSYS2's UCRT64 one is the default.
