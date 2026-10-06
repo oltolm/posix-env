@@ -13,13 +13,27 @@ rattler-build and installed with micromamba. Only the local channel in
 
 ## Using it
 
-`tools\posix-shell.cmd` opens a POSIX shell. On first use it creates the
-environment in `%USERPROFILE%\posix-env` (per user only) from the local
-channel, with posix-env, autoconf, automake, libtool, gettext-tools, pkgconf,
-diffutils, patch, gzip, libarchive, xz and zstd, and adds a Start menu entry
-and a Windows Terminal profile, both named "POSIX Shell"
-(`tools\posix-shell-entries.ps1 -Remove` deletes them). Arguments go to `sh`:
-`posix-shell -c "make"`.
+`tools\posix-shell.cmd` is the launcher; it takes a command:
+
+| Command | Does |
+|---|---|
+| `posix-shell run` | opens a POSIX shell |
+| `posix-shell run COMMAND...` | runs a command in the environment (`posix-shell run make -j8`) |
+| `posix-shell install NAME...` | adds packages (`posix-shell install dejagnu`) |
+| `posix-shell remove NAME...` | removes packages |
+| `posix-shell list` | lists the installed packages |
+| `posix-shell update` | updates all packages and adds missing default ones |
+| `posix-shell help` | lists the commands (also without a command) |
+
+In the shell, `posix-env COMMAND` does the same (`posix-env install
+dejagnu`). Double-clicked, the launcher opens the shell.
+
+On first use it creates the environment in `%USERPROFILE%\posix-env` (per
+user only) from the local channel, with posix-env, autoconf, automake,
+libtool, gettext-tools, pkgconf, diffutils, patch, gzip, libarchive, xz and
+zstd, and `run` adds a Start menu entry and a Windows Terminal profile, both
+named "POSIX Shell" and both running `posix-shell run`
+(`tools\posix-shell-entries.ps1 -Remove` deletes them).
 
 | Variable | Meaning | Default |
 |---|---|---|

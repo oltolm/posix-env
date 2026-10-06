@@ -1,6 +1,7 @@
 # Creates the user's entries for posix-shell.cmd: a Start menu shortcut and
-# a Windows Terminal profile.  posix-shell.cmd runs this when an entry is
-# missing; -Remove deletes both.
+# a Windows Terminal profile, both running "posix-shell.cmd run".
+# posix-shell.cmd runs this when an entry is missing or predates the run
+# command; existing entries are rewritten.  -Remove deletes both.
 #   powershell -NoProfile -ExecutionPolicy Bypass -File posix-shell-entries.ps1 [-Remove]
 param([switch]$Remove)
 $ErrorActionPreference = 'Stop'
@@ -19,23 +20,24 @@ if ($Remove) {
   return
 }
 
-if (-not (Test-Path $shortcut)) {
+& {
   $shell = New-Object -ComObject WScript.Shell
   $lnk = $shell.CreateShortcut($shortcut)
   $lnk.TargetPath = $launcher
+  $lnk.Arguments = 'run'
   $lnk.WorkingDirectory = $env:USERPROFILE
   $lnk.Description = 'POSIX shell (brush) with the posix-env tools'
   $lnk.IconLocation = "$env:SystemRoot\System32\cmd.exe,0"
   $lnk.Save()
 }
 
-if (-not (Test-Path $fragment)) {
+& {
   New-Item -ItemType Directory -Force $fragmentDir | Out-Null
   $profile = [ordered]@{
     profiles = @(
       [ordered]@{
         name = $name
-        commandline = $launcher
+        commandline = "`"$launcher`" run"
         startingDirectory = '%USERPROFILE%'
         icon = "$env:SystemRoot\System32\cmd.exe"
       }
