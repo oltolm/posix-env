@@ -1,0 +1,30 @@
+From 206189e467652a9bed6e5ac0f1fed5cd77dc7c29 Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Tue, 6 Oct 2026 19:28:02 +0200
+Subject: [PATCH 2/8] Channels write LF line endings on Windows too
+
+---
+ win/tclWinPort.h | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/win/tclWinPort.h b/win/tclWinPort.h
+index 7bcc076..b1fd002 100644
+--- a/win/tclWinPort.h
++++ b/win/tclWinPort.h
+@@ -507,10 +507,11 @@ typedef DWORD_PTR * PDWORD_PTR;
+  */
+ 
+ /*
+- * The default platform eol translation on Windows is TCL_TRANSLATE_CRLF:
++ * posix-env: channels write LF line endings, as on POSIX systems (input
++ * still accepts CRLF through the "auto" translation).
+  */
+ 
+-#define	TCL_PLATFORM_TRANSLATION	TCL_TRANSLATE_CRLF
++#define	TCL_PLATFORM_TRANSLATION	TCL_TRANSLATE_LF
+ 
+ /*
+  * Declare dynamic loading extension macro.
+-- 
+2.56.0.windows.1
+

@@ -1,0 +1,73 @@
+context:
+  version: "1.6.3"
+
+package:
+  name: dejagnu
+  version: ${{ version }}
+
+source:
+  url: https://ftpmirror.gnu.org/gnu/dejagnu/dejagnu-${{ version }}.tar.gz
+  sha256: 87daefacd7958b4a69f88c6856dbd1634261963c414079d0c371f589cd66a2e3
+  patches:
+    # Timed-out programs were killed with "kill -2 -PGID" through sh; the
+    # Expect package's exp_kill ends them and their children.
+    - 0001-close_wait_program-kill-with-exp_kill-where-Expect-h.patch
+    # config.guess knows MinGW only by MSYS's uname.
+    - 0002-runtest-the-build-triplet-on-native-Windows-without-.patch
+    # which split PATH at ':' and found no NAME.exe.
+    - 0003-which-PATH-separated-by-and-program-extensions-on-Wi.patch
+    # The dejagnu launcher ran sh commands as /bin/sh.
+    - 0004-dejagnu-run-sh-commands-with-CONFIG_SHELL-not-bin-sh.patch
+    # Testsuites look for $objdir/../as-new, gcc/xgcc and the like
+    # (Cygwin's Tcl finds as-new.exe by that name).
+    - 0005-findfile-lookfor_file-a-program-NAME-is-NAME.exe-on-.patch
+
+build:
+  number: 2
+  script:
+    interpreter: brush
+    content:
+      - mkdir build
+      - cd build
+      - '"$SRC_DIR/configure" --prefix="$PREFIX"'
+      - make -j"$(nproc)"
+      - make install
+      - rm -f "$PREFIX/share/info/dir"
+      # runtest and dejagnu are #! scripts; programs that start them
+      # without a shell look for NAME.exe.
+      - cp "$PREFIX/libexec/posix-env/scriptexe.exe" "$PREFIX/bin/runtest.exe"
+      - cp "$PREFIX/libexec/posix-env/scriptexe.exe" "$PREFIX/bin/dejagnu.exe"
+      # DejaGnu's own tests of the launcher and report-card commands; the
+      # runtest.libs tests drive an interactive expect, which needs a
+      # terminal, and the libdejagnu unit test needs <regex.h>.
+      - make check-DEJAGNU DEJATOOL="launcher report-card"
+
+requirements:
+  build:
+    - posix-env
+    - expect
+  host:
+    - scriptexe
+  run:
+    - expect
+    - tcl
+
+tests:
+  - files:
+      recipe:
+        - test/
+    requirements:
+      run:
+        - posix-env
+    script:
+      interpreter: cmd
+      content:
+        - runtest --version | findstr /b /c:"DejaGnu version" || exit /b 1
+        - runtest --version | findstr /b /c:"Expect version" || exit /b 1
+        - cd test && sh run.sh || exit /b 1
+
+about:
+  homepage: https://www.gnu.org/software/dejagnu/
+  license: GPL-3.0-or-later
+  license_file: COPYING
+  summary: Framework for testing other programs (runtest)

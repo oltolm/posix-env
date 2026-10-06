@@ -1,0 +1,47 @@
+From 18c57aa17008172f327824bac84e6b5edc88049a Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Tue, 6 Oct 2026 20:29:47 +0200
+Subject: [PATCH 8/8] Open files can be deleted and renamed (FILE_SHARE_DELETE)
+
+---
+ win/tclWinChan.c | 4 +++-
+ win/tclWinPipe.c | 4 +++-
+ 2 files changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/win/tclWinChan.c b/win/tclWinChan.c
+index 4be4ab5..5587cfe 100644
+--- a/win/tclWinChan.c
++++ b/win/tclWinChan.c
+@@ -983,9 +983,11 @@ TclpOpenFileChannel(
+ 
+     /*
+      * Set up the file sharing mode.  We want to allow simultaneous access.
++     * posix-env: and deleting or renaming an open file, as POSIX systems
++     * allow.
+      */
+ 
+-    shareMode = FILE_SHARE_READ | FILE_SHARE_WRITE;
++    shareMode = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
+ 
+     /*
+      * Now we get to create the file.
+diff --git a/win/tclWinPipe.c b/win/tclWinPipe.c
+index abe83dd..203195c 100644
+--- a/win/tclWinPipe.c
++++ b/win/tclWinPipe.c
+@@ -617,9 +617,11 @@ TclpOpenFile(
+ 
+     /*
+      * Set up the file sharing mode.  We want to allow simultaneous access.
++     * posix-env: and deleting or renaming an open file, as POSIX systems
++     * allow.
+      */
+ 
+-    shareMode = FILE_SHARE_READ | FILE_SHARE_WRITE;
++    shareMode = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
+ 
+     /*
+      * Now we get to create the file.
+-- 
+2.56.0.windows.1
+

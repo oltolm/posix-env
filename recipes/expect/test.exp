@@ -1,0 +1,132 @@
+# Tests of the Expect package, as DejaGnu and the GCC and binutils
+# testsuites use it.  Run as "expect test.exp"; prints "ok" at the end.
+
+proc check {what got want} {
+    if {$got ne $want} {
+        puts "FAIL: $what: got \"$got\", want \"$want\""
+        exit 1
+    }
+}
+
+log_user 0
+# Expect starts with a global timeout of 10 (DejaGnu's remote_exec reads it).
+check "default timeout" $timeout 10
+
+# A program's output, matched with -re and exp_continue, until eof; then
+# its exit status.
+spawn printf "one\ntwo\nthree\n"
+set lines {}
+expect {
+    -re "(\[a-z\]+)\n" {
+        lappend lines $expect_out(1,string)
+        exp_continue
+    }
+    eof {}
+}
+check "lines" $lines {one two three}
+check "wait" [lrange [wait] 2 3] {0 0}
+
+# Glob patterns: unanchored, ^ anchors; expect_out(buffer) runs to the end
+# of the match.
+spawn printf "abc def ghi"
+expect "d?f" {}
+check "glob 0" $expect_out(0,string) "def"
+check "glob buffer" $expect_out(buffer) "abc def"
+expect {
+    "^ghi" { set r anchored }
+    -ex " ghi" { set r exact }
+}
+check "-ex" $r exact
+wait
+
+# Status, stderr merged into the output, CRLF read as LF.
+spawn sh -c "printf 'err\\r\\n' >&2; exit 3"
+expect {
+    -re ".+" { append out $expect_out(buffer); exp_continue }
+    eof {}
+}
+check "stderr and CRLF" $out "err\n"
+check "exit status" [lindex [wait] 3] 3
+
+# send to a program; close gives it end of file.
+spawn cat
+send "hello\n"
+expect "hello\n" { set r echoed } timeout { set r timeout }
+check "send" $r echoed
+close
+check "close then wait" [lindex [wait] 3] 0
+
+# Timeout, then kill: a hanging program does not block.
+spawn sleep 60
+set pid [exp_pid]
+set timeout 1
+expect {
+    timeout { set r timeout }
+    eof { set r eof }
+}
+check "timeout" $r timeout
+exp_kill $pid
+close
+wait
+set timeout 10
+
+# DejaGnu's local_exec: a pipeline opened by Tcl, taken over with
+# spawn -leaveopen; the status comes from closing the channel.
+set id [open "| sh -c {echo out; exit 2} |& cat" r]
+spawn -leaveopen $id
+set out {}
+expect {
+    -i $spawn_id -re ".+" { append out $expect_out(buffer); exp_continue }
+    eof {}
+}
+check "leaveopen output" $out "out\n"
+close -i $spawn_id
+wait -i $spawn_id
+check "pipeline status" [catch {close $id}] 1
+
+# A program that does not exist: its error is the output.
+spawn no-such-program-here
+expect {
+    eof { set r eof }
+}
+check "missing program" $r eof
+check "missing program status" [lindex [wait] 3] 255
+
+# expect_after applies to later expects on the same spawn id.
+spawn printf "zzz"
+expect_after {
+    "zzz" { set r after }
+}
+expect {
+    "nomatch" { set r main }
+}
+check "expect_after" $r after
+expect_after
+wait
+
+# The log file gets spawn's echo and the program's output.
+log_file -noappend expect-test.log
+spawn printf "logged\n"
+expect eof
+wait
+log_file
+set f [open expect-test.log]
+set log [read $f]
+close $f
+check "log" [string match "*spawn printf*logged*" $log] 1
+
+# return in an action returns from the procedure that called expect.
+proc returns {} {
+    global spawn_id
+    spawn printf "x"
+    expect "x" { return early }
+    return late
+}
+check "return in action" [returns] early
+wait
+
+check "timestamp" [timestamp -format %Y -seconds 0 -gmt 1] 1970
+check "exp_version" [exp_version] 5.45.4
+
+send_user "ok\n"
+exit 0

@@ -1,0 +1,32 @@
+# DejaGnu on native Windows: a test that passes, a program run through
+# remote_exec, a #! script, and a hanging program that times out and is
+# killed.
+pass "first"
+
+set r [remote_exec host "printf" "hello"]
+if { [lindex $r 0] == 0 && [lindex $r 1] eq "hello" } {
+    pass "remote_exec"
+} else {
+    fail "remote_exec: $r"
+}
+
+set r [remote_exec host "sh" "-c {exit 3}"]
+if { [lindex $r 0] != 0 } {
+    pass "exit status"
+} else {
+    fail "exit status: $r"
+}
+
+set start [clock seconds]
+set r [remote_exec host "sleep" "60" "" "" 2]
+if { [lindex $r 0] != 0 && [clock seconds] - $start < 30 } {
+    pass "timeout"
+} else {
+    fail "timeout: $r"
+}
+
+if { [which sh] != 0 } {
+    pass "which"
+} else {
+    fail "which"
+}

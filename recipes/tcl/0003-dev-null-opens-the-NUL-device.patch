@@ -1,0 +1,59 @@
+From 393d4725207e8a441a3216ac0b50607e6e338ab7 Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Tue, 6 Oct 2026 19:28:02 +0200
+Subject: [PATCH 3/8] /dev/null opens the NUL device (open,
+ exec redirections)
+
+---
+ win/tclWinFile.c | 15 +++++++++++++++
+ win/tclWinPipe.c |  8 ++++++++
+ 2 files changed, 23 insertions(+)
+
+diff --git a/win/tclWinFile.c b/win/tclWinFile.c
+index eeb48b7..251364a 100644
+--- a/win/tclWinFile.c
++++ b/win/tclWinFile.c
+@@ -3088,6 +3088,21 @@ TclNativeCreateNativeRep(
+     len = Tcl_DStringLength(&ds);
+     Tcl_FreeEncoding(utf8);
+ 
++    /*
++     * posix-env: /dev/null is the NUL device (for open, file exists, file
++     * stat, ...), also as made absolute on a drive (C:/dev/null).
++     */
++
++    if (strcmp(str, "/dev/null") == 0 || strcmp(str, "\\dev\\null") == 0
++	    || (len == 11 && isalpha(UCHAR(str[0])) && str[1] == ':'
++		&& (strcmp(str + 2, "/dev/null") == 0
++		    || strcmp(str + 2, "\\dev\\null") == 0))) {
++	Tcl_DStringFree(&ds);
++	Tcl_DStringAppend(&ds, "NUL", 3);
++	str = Tcl_DStringValue(&ds);
++	len = 3;
++    }
++
+     if (strlen(str) != (size_t)len) {
+ 	/*
+ 	 * String contains NUL-bytes. This is invalid.
+diff --git a/win/tclWinPipe.c b/win/tclWinPipe.c
+index 22b20b8..db7dfcd 100644
+--- a/win/tclWinPipe.c
++++ b/win/tclWinPipe.c
+@@ -577,6 +577,14 @@ TclpOpenFile(
+ 	break;
+     }
+ 
++    /*
++     * posix-env: /dev/null is the NUL device.  exec's redirections pass
++     * the name with backslashes (Tcl_TranslateFileName).
++     */
++
++    if (strcmp(path, "/dev/null") == 0 || strcmp(path, "\\dev\\null") == 0) {
++	path = "NUL";
++    }
+     nativePath = (WCHAR *)Tcl_WinUtfToTChar(path, -1, &ds);
+ 
+     /*
+-- 
+2.56.0.windows.1
+

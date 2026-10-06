@@ -1,0 +1,40 @@
+From 6c06c4f2925a88c93d1134a7aeafc16a73503076 Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Tue, 6 Oct 2026 20:10:41 +0200
+Subject: [PATCH] findfile, lookfor_file: a program NAME is NAME.exe on Windows
+
+---
+ runtest.exp | 10 ++++++++--
+ 1 file changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/runtest.exp b/runtest.exp
+index 8f4dae5..ce0bc4a 100644
+--- a/runtest.exp
++++ b/runtest.exp
+@@ -264,7 +264,11 @@ proc transform { name } {
+ proc findfile { args } {
+     # look for the file
+     verbose "Seeing if [lindex $args 0] exists." 2
+-    if {[file exists [lindex $args 0]]} {
++    # On Windows, a program NAME is the file NAME.exe (testsuites look
++    # for $objdir/../as-new and the like).
++    if {[file exists [lindex $args 0]]
++	|| ($::tcl_platform(platform) eq "windows"
++	    && [file exists [lindex $args 0].exe])} {
+ 	if { [llength $args] > 1 } {
+ 	    verbose "Found file, returning [lindex $args 1]"
+ 	    return [lindex $args 1]
+@@ -637,7 +641,9 @@ verbose "Login name is $logname"
+ proc lookfor_file { dir name } {
+     foreach x [list . .. ../.. ../../.. ../../../..] {
+ 	verbose $dir/$x/$name 2
+-	if {[file exists [file join $dir $name]]} {
++	if {[file exists [file join $dir $name]]
++	    || ($::tcl_platform(platform) eq "windows"
++		&& [file exists [file join $dir $name].exe])} {
+ 	    return [file join $dir $name]
+ 	}
+ 	set dir [remote_file build dirname $dir]
+-- 
+2.56.0.windows.1
+

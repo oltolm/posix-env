@@ -1,0 +1,36 @@
+From bf6b08548b67b166e49d12f32a742ea74da3828e Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Tue, 6 Oct 2026 19:58:54 +0200
+Subject: [PATCH 2/4] runtest: the build triplet on native Windows without
+ config.guess
+
+---
+ runtest.exp | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/runtest.exp b/runtest.exp
+index 01abaf1..8f4dae5 100644
+--- a/runtest.exp
++++ b/runtest.exp
+@@ -807,6 +807,18 @@ unset arg_host_triplet arg_build_triplet
+ # If the build machine type hasn't been specified by now, use config.guess.
+ #
+ 
++if {[expr {$build_triplet eq "" && $host_triplet eq ""}]
++    && $tcl_platform(platform) eq "windows"} {
++    # Native Windows: config.guess knows MinGW only by MSYS's uname.
++    switch -- $tcl_platform(machine) {
++	amd64 { set build_triplet x86_64-w64-mingw32 }
++	arm64 { set build_triplet aarch64-w64-mingw32 }
++	default { set build_triplet i686-w64-mingw32 }
++    }
++    verbose "Assuming build host is $build_triplet"
++    set host_triplet $build_triplet
++}
++
+ if {[expr {$build_triplet eq "" && $host_triplet eq ""}]} {
+     # find config.guess
+     foreach dir [list $libdir $libdir/libexec $libdir/.. $execpath $srcdir $srcdir/.. $srcdir/../..] {
+-- 
+2.56.0.windows.1
+

@@ -1,0 +1,352 @@
+From 133f99c9ff9cba9146e748cce006a6c0c661d788 Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Tue, 6 Oct 2026 19:28:02 +0200
+Subject: [PATCH 4/8] exec and open |: run #! scripts through their interpreter
+
+---
+ win/tclWinFile.c |  36 +++++---
+ win/tclWinPipe.c | 210 ++++++++++++++++++++++++++++++++++++++++++++++-
+ 2 files changed, 231 insertions(+), 15 deletions(-)
+
+diff --git a/win/tclWinFile.c b/win/tclWinFile.c
+index 251364a..24e9f84 100644
+--- a/win/tclWinFile.c
++++ b/win/tclWinFile.c
+@@ -1884,23 +1884,37 @@ NativeIsExec(
+     const WCHAR *path)
+ {
+     size_t len = wcslen(path);
++    HANDLE handle;
++    char magic[2];
++    DWORD read = 0;
+ 
+-    if (len < 5) {
+-	return 0;
++    if (len >= 5 && path[len-4] == '.') {
++	const WCHAR *ext = path + len - 3;
++
++	if ((_wcsicmp(ext, L"exe") == 0)
++		|| (_wcsicmp(ext, L"com") == 0)
++		|| (_wcsicmp(ext, L"cmd") == 0)
++		|| (_wcsicmp(ext, L"bat") == 0)) {
++	    return 1;
++	}
+     }
+ 
+-    if (path[len-4] != '.') {
++    /*
++     * posix-env: a script with a #! line is executable, as exec and
++     * open | run it through its interpreter.
++     */
++
++    handle = CreateFileW(path, GENERIC_READ,
++	    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
++	    OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
++    if (handle == INVALID_HANDLE_VALUE) {
+ 	return 0;
+     }
+-
+-    path += len-3;
+-    if ((_wcsicmp(path, L"exe") == 0)
+-	    || (_wcsicmp(path, L"com") == 0)
+-	    || (_wcsicmp(path, L"cmd") == 0)
+-	    || (_wcsicmp(path, L"bat") == 0)) {
+-	return 1;
++    if (!ReadFile(handle, magic, 2, &read, NULL)) {
++	read = 0;
+     }
+-    return 0;
++    CloseHandle(handle);
++    return read == 2 && magic[0] == '#' && magic[1] == '!';
+ }
+ 
+ /*
+diff --git a/win/tclWinPipe.c b/win/tclWinPipe.c
+index db7dfcd..841e642 100644
+--- a/win/tclWinPipe.c
++++ b/win/tclWinPipe.c
+@@ -165,12 +165,28 @@ typedef struct {
+ 				 * pointer. */
+ } PipeEvent;
+ 
++/*
++ * posix-env: a program that is a script with a #! line runs through its
++ * interpreter, as on POSIX systems.  ApplicationType fills this in.
++ */
++
++typedef struct {
++    char path[MAX_PATH * TCL_UTF_MAX];	/* Script with forward slashes, or
++					 * empty if the program is no script. */
++    char line[MAX_PATH * TCL_UTF_MAX];	/* Its #! line, without the #!. */
++    char arg[MAX_PATH * TCL_UTF_MAX];	/* The interpreter's argument from
++					 * the #! line, or empty. */
++} ScriptInfo;
++
+ /*
+  * Declarations for functions used only in this file.
+  */
+ 
+ static int		ApplicationType(Tcl_Interp *interp,
+-			    const char *fileName, char *fullName);
++			    const char *fileName, char *fullName,
++			    ScriptInfo *scriptPtr);
++static int		ScriptInterpreter(Tcl_Interp *interp,
++			    ScriptInfo *scriptPtr, char *fullName);
+ static void		BuildCommandLine(const char *executable, int argc,
+ 			    const char **argv, Tcl_DString *linePtr);
+ static BOOL		HasConsole(void);
+@@ -950,10 +966,12 @@ TclpCreateProcess(
+     HANDLE hProcess, h, inputHandle, outputHandle, errorHandle;
+     char execPath[MAX_PATH * TCL_UTF_MAX];
+     WinFile *filePtr;
++    ScriptInfo script;
+ 
+     PipeInit();
+ 
+-    applType = ApplicationType(interp, argv[0], execPath);
++    script.path[0] = '\0';
++    applType = ApplicationType(interp, argv[0], execPath, &script);
+     if (applType == APPL_NONE) {
+ 	return TCL_ERROR;
+     }
+@@ -1139,7 +1157,28 @@ TclpCreateProcess(
+      * ab~1.def instead of "a b.default").
+      */
+ 
+-    BuildCommandLine(execPath, argc, argv, &cmdLine);
++    if (script.path[0] != '\0') {
++	/*
++	 * posix-env: interpreter, its argument, the script, the arguments.
++	 */
++
++	const char **scriptArgv = (const char **)
++		ckalloc((argc + 2) * sizeof(const char *));
++	int scriptArgc = 0, i;
++
++	scriptArgv[scriptArgc++] = execPath;
++	if (script.arg[0] != '\0') {
++	    scriptArgv[scriptArgc++] = script.arg;
++	}
++	scriptArgv[scriptArgc++] = script.path;
++	for (i = 1; i < argc; i++) {
++	    scriptArgv[scriptArgc++] = argv[i];
++	}
++	BuildCommandLine(execPath, scriptArgc, scriptArgv, &cmdLine);
++	ckfree(scriptArgv);
++    } else {
++	BuildCommandLine(execPath, argc, argv, &cmdLine);
++    }
+ 
+     if (CreateProcessW(NULL, (WCHAR *) Tcl_DStringValue(&cmdLine),
+ 	    NULL, NULL, TRUE, (DWORD) createFlags, NULL, NULL, &startInfo,
+@@ -1252,6 +1291,10 @@ HasConsole(void)
+  *	type, APPL_NONE is returned and an error message is left in interp.
+  *	.bat files are identified as APPL_DOS.
+  *
++ *	posix-env: if scriptPtr is not NULL and no executable is found, but
++ *	a script with a #! line, fullName is its interpreter and *scriptPtr
++ *	describes the script.
++ *
+  * Side effects:
+  *	None.
+  *
+@@ -1262,8 +1305,9 @@ static int
+ ApplicationType(
+     Tcl_Interp *interp,		/* Interp, for error message. */
+     const char *originalName,	/* Name of the application to find. */
+-    char fullName[])		/* Filled with complete path to
++    char fullName[],		/* Filled with complete path to
+ 				 * application. */
++    ScriptInfo *scriptPtr)	/* Filled in for a #! script, or NULL. */
+ {
+     int applType, i, nameLen, found;
+     HANDLE hFile;
+@@ -1333,6 +1377,23 @@ ApplicationType(
+ 	    continue;
+ 	}
+ 
++	if (attr & FILE_ATTRIBUTE_REPARSE_POINT) {
++	    /*
++	     * posix-env: a symbolic link is followed and its target examined
++	     * (a link to a #! script must run through the interpreter).
++	     */
++
++	    HANDLE hTarget = CreateFileW(nativeFullPath,
++		    GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING,
++		    FILE_ATTRIBUTE_NORMAL, NULL);
++
++	    if (hTarget != INVALID_HANDLE_VALUE) {
++		CloseHandle(hFile);
++		hFile = hTarget;
++		attr &= ~FILE_ATTRIBUTE_REPARSE_POINT;
++	    }
++	}
++
+ 	if (attr & FILE_ATTRIBUTE_REPARSE_POINT) {
+ 	    /*
+ 	     * But [4f0b5767ac]. Likely a App Execution Alias. This can only
+@@ -1347,6 +1408,34 @@ ApplicationType(
+ 
+ 	header.e_magic = 0;
+ 	ReadFile(hFile, (void *) &header, sizeof(header), &read, NULL);
++	if (header.e_magic != IMAGE_DOS_SIGNATURE && scriptPtr != NULL
++		&& scriptPtr->path[0] == '\0' && read >= 2
++		&& memcmp(&header, "#!", 2) == 0) {
++	    /*
++	     * posix-env: remember the first #! script; an executable found
++	     * with one of the later extensions still takes precedence.
++	     */
++
++	    char *p, *end;
++
++	    SetFilePointer(hFile, 2, NULL, FILE_BEGIN);
++	    if (ReadFile(hFile, scriptPtr->line, sizeof(scriptPtr->line) - 1,
++		    &read, NULL)) {
++		scriptPtr->line[read] = '\0';
++		end = strpbrk(scriptPtr->line, "\r\n");
++		if (end != NULL) {
++		    *end = '\0';
++		}
++		if (end != NULL || read < sizeof(scriptPtr->line) - 1) {
++		    strcpy(scriptPtr->path, fullName);
++		    for (p = scriptPtr->path; *p != '\0'; p++) {
++			if (*p == '\\') {
++			    *p = '/';
++			}
++		    }
++		}
++	    }
++	}
+ 	if (header.e_magic != IMAGE_DOS_SIGNATURE) {
+ 	    /*
+ 	     * Doesn't have the magic number for relocatable executables. If
+@@ -1403,6 +1492,34 @@ ApplicationType(
+     }
+     Tcl_DStringFree(&nameBuf);
+ 
++    if (scriptPtr != NULL && scriptPtr->path[0] != '\0') {
++	if (applType == APPL_NONE) {
++	    return ScriptInterpreter(interp, scriptPtr, fullName);
++	}
++	scriptPtr->path[0] = '\0';
++    }
++
++    /*
++     * posix-env: /bin/NAME and /usr/bin/NAME, which do not exist, are NAME
++     * in PATH, as on a #! line (exec /bin/sh -c ...).  The name has been
++     * translated to backslashes.
++     */
++
++    if (applType == APPL_NONE && scriptPtr != NULL) {
++	const char *base = NULL;
++
++	if (strncmp(originalName, "\\bin\\", 5) == 0
++		|| strncmp(originalName, "/bin/", 5) == 0) {
++	    base = originalName + 5;
++	} else if (strncmp(originalName, "\\usr\\bin\\", 9) == 0
++		|| strncmp(originalName, "/usr/bin/", 9) == 0) {
++	    base = originalName + 9;
++	}
++	if (base != NULL && *base != '\0' && strpbrk(base, "/\\") == NULL) {
++	    return ApplicationType(interp, base, fullName, scriptPtr);
++	}
++    }
++
+     if (applType == APPL_NONE) {
+ 	TclWinConvertError(GetLastError());
+ 	Tcl_SetObjResult(interp, Tcl_ObjPrintf("couldn't execute \"%s\": %s",
+@@ -1424,6 +1541,91 @@ ApplicationType(
+     }
+     return applType;
+ }
++
++/*
++ *----------------------------------------------------------------------
++ *
++ * ScriptInterpreter --
++ *
++ *	posix-env: finds the interpreter named on a script's #! line, as
++ *	POSIX systems run it: the interpreter, at most one argument (the
++ *	rest of the line), the script, the script's arguments.  The
++ *	interpreter is looked up by its path first, then by its file name
++ *	in PATH (#!/bin/sh finds sh.exe); "#!/usr/bin/env NAME" looks up
++ *	NAME.
++ *
++ * Results:
++ *	The interpreter's application type as for ApplicationType, with its
++ *	path in fullName and its argument in scriptPtr->arg; APPL_NONE with
++ *	an error message in interp if there is none.
++ *
++ *----------------------------------------------------------------------
++ */
++
++static int
++ScriptInterpreter(
++    Tcl_Interp *interp,		/* Interp, for error message. */
++    ScriptInfo *scriptPtr,	/* The script; its arg is filled in. */
++    char fullName[])		/* Filled with the interpreter's path. */
++{
++    char name[MAX_PATH * TCL_UTF_MAX];
++    char *line = scriptPtr->line, *p, *base;
++    size_t len;
++    int applType;
++
++    while (*line == ' ' || *line == '\t') {
++	line++;
++    }
++    len = strcspn(line, " \t");
++    memcpy(name, line, len);
++    name[len] = '\0';
++    line += len;
++    while (*line == ' ' || *line == '\t') {
++	line++;
++    }
++    len = strlen(line);
++    while (len > 0 && (line[len - 1] == ' ' || line[len - 1] == '\t')) {
++	len--;
++    }
++    line[len] = '\0';
++
++    base = name;
++    for (p = name; *p != '\0'; p++) {
++	if (*p == '/' || *p == '\\') {
++	    base = p + 1;
++	}
++    }
++    if ((strcmp(base, "env") == 0 || strcasecmp(base, "env.exe") == 0)
++	    && *line != '\0') {
++	len = strcspn(line, " \t");
++	memmove(name, line, len);
++	name[len] = '\0';
++	line += len;
++	while (*line == ' ' || *line == '\t') {
++	    line++;
++	}
++	base = name;
++    }
++    strcpy(scriptPtr->arg, line);
++
++    if (name[0] == '\0') {
++	Tcl_SetObjResult(interp, Tcl_ObjPrintf(
++		"couldn't execute \"%s\": no interpreter on its #! line",
++		scriptPtr->path));
++	return APPL_NONE;
++    }
++    applType = ApplicationType(interp, name, fullName, NULL);
++    if (applType == APPL_NONE && base != name) {
++	Tcl_ResetResult(interp);
++	applType = ApplicationType(interp, base, fullName, NULL);
++    }
++    if (applType == APPL_NONE) {
++	Tcl_SetObjResult(interp, Tcl_ObjPrintf(
++		"couldn't execute \"%s\": interpreter \"%s\" not found",
++		scriptPtr->path, name));
++    }
++    return applType;
++}
+ 
+ /*
+  *----------------------------------------------------------------------
+-- 
+2.56.0.windows.1
+

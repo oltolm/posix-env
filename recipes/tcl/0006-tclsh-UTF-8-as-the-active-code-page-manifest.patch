@@ -1,0 +1,26 @@
+From d03d1d820e265c8937787e8415abd15fa0af2841 Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Tue, 6 Oct 2026 19:33:23 +0200
+Subject: [PATCH 6/8] tclsh: UTF-8 as the active code page (manifest)
+
+---
+ win/tclsh.exe.manifest.in | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/win/tclsh.exe.manifest.in b/win/tclsh.exe.manifest.in
+index 8b06fce..8328cd4 100644
+--- a/win/tclsh.exe.manifest.in
++++ b/win/tclsh.exe.manifest.in
+@@ -36,6 +36,9 @@
+ 	<asmv3:windowsSettings
+ 		xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">
+ 	    <dpiAware>true</dpiAware>
++	    <activeCodePage
++		    xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings"
++		>UTF-8</activeCodePage>
+ 	</asmv3:windowsSettings>
+     </asmv3:application>
+     <dependency>
+-- 
+2.56.0.windows.1
+

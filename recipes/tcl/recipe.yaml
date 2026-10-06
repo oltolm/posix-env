@@ -1,0 +1,77 @@
+context:
+  version: "8.6.18"
+
+package:
+  name: tcl
+  version: ${{ version }}
+
+source:
+  url: https://downloads.sourceforge.net/sourceforge/tcl/tcl${{ version }}-src.tar.gz
+  sha256: 14f9af32b1767ff718477a8f974ad03c34341097e6b43f4ce54644ee974e268e
+  patches:
+    # win/configure ran config.status with /bin/sh, which does not exist.
+    - 0001-win-configure-run-config.status-with-the-configure-s.patch
+    # posix-env: LF line endings by default, as the other tools write.
+    - 0002-Channels-write-LF-line-endings-on-Windows-too.patch
+    # posix-env: /dev/null in open, file exists and exec redirections
+    # (DejaGnu uses it).
+    - 0003-dev-null-opens-the-NUL-device.patch
+    # posix-env: exec and open | run #! scripts, as brush and env do, also
+    # through symbolic links; file executable is true for them; /bin/NAME
+    # and /usr/bin/NAME are NAME in PATH.
+    - 0004-exec-and-open-run-scripts-through-their-interpreter.patch
+    # posix-env: a ^Z in a file or pipe is data, not the end of the input.
+    - 0005-No-Z-eof-character-on-files-and-pipes.patch
+    # posix-env: UTF-8 active code page.
+    - 0006-tclsh-UTF-8-as-the-active-code-page-manifest.patch
+    # posix-env: an environment variable set to "" exists (the C runtime
+    # deleted it); DejaGnu restores LD_LIBRARY_PATH to "".
+    - 0007-Empty-environment-variables-on-Windows.patch
+    # posix-env: an open file can be deleted or renamed, as on POSIX
+    # systems (binutils' windres test deletes files it still reads).
+    - 0008-Open-files-can-be-deleted-and-renamed-FILE_SHARE_DEL.patch
+
+build:
+  number: 3
+  script:
+    interpreter: brush
+    file: build.sh
+
+requirements:
+  run_exports:
+    - ${{ pin_subpackage('tcl', upper_bound='x.x') }}
+  build:
+    - posix-env
+  host:
+    - zlib
+  run:
+    - zlib
+
+tests:
+  - files:
+      recipe:
+        - test.tcl
+    requirements:
+      run:
+        - posix-env
+    script:
+      interpreter: cmd
+      content:
+        - tclsh test.tcl | findstr /b ok || exit /b 1
+        - echo puts [info patchlevel] | tclsh86 | findstr /b ${{ version }} || exit /b 1
+  - package_contents:
+      files:
+        - bin/tcl86.dll
+        - bin/tclsh.exe
+        - bin/tclsh86.exe
+        - lib/libtcl86.dll.a
+        - lib/libtclstub86.a
+        - lib/tclConfig.sh
+        - lib/tcl8.6/init.tcl
+        - include/tcl.h
+
+about:
+  homepage: https://www.tcl-lang.org/
+  license: TCL
+  license_file: license.terms
+  summary: The Tcl scripting language

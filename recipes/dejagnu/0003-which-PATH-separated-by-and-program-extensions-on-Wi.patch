@@ -1,0 +1,77 @@
+From c79f34227f9fd771cf9d1b2097c5ac81e9f6a1bf Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Tue, 6 Oct 2026 19:58:54 +0200
+Subject: [PATCH 3/4] which: PATH separated by ';' and program extensions on
+ Windows
+
+---
+ lib/utils.exp | 39 ++++++++++++++++++++++++++-------------
+ 1 file changed, 26 insertions(+), 13 deletions(-)
+
+diff --git a/lib/utils.exp b/lib/utils.exp
+index d74c3b8..2215461 100644
+--- a/lib/utils.exp
++++ b/lib/utils.exp
+@@ -156,33 +156,46 @@ proc which { file } {
+     # strip off any extraneous arguments (like flags to the compiler)
+     set file [lindex $file 0]
+ 
++    # On Windows, PATH is separated by ";" and programs are found with
++    # an extension added, as the system finds them.
++    if { $::tcl_platform(platform) eq "windows" } {
++	set sep ";"
++	set exts [list "" .exe .com .bat .cmd]
++    } else {
++	set sep ":"
++	set exts [list ""]
++    }
++
+     # if the filename has a path component, then the file must exist
+     if {[llength [file split $file]] > 1} {
+ 	verbose "Checking $file" 2
+-	if {[file exists $file] && [file executable $file]} {
+-	    verbose "file $file is executable" 2
+-	    return [file normalize $file]
+-	} else {
+-	    return 0
++	foreach ext $exts {
++	    if {[file isfile $file$ext] && [file executable $file$ext]} {
++		verbose "file $file$ext is executable" 2
++		return [file normalize $file$ext]
++	    }
+ 	}
++	return 0
+     }
+ 
+     # Otherwise the file must exist in the PATH
+     if {[info exists env(PATH)]} {
+-	set path [split $env(PATH) ":"]
++	set path [split $env(PATH) $sep]
+     } else {
+ 	return 0
+     }
+ 
+     foreach dir $path {
+ 	verbose "Checking $dir for $file" 3
+-	set filename [file normalize [file join $dir $file]]
+-	if {[file exists $filename]} {
+-	    if {[file executable $filename]} {
+-		verbose "Choosing $filename" 2
+-		return [file normalize $filename]
+-	    } else {
+-		warning "file $filename exists but is not executable"
++	foreach ext $exts {
++	    set filename [file normalize [file join $dir $file$ext]]
++	    if {[file isfile $filename]} {
++		if {[file executable $filename]} {
++		    verbose "Choosing $filename" 2
++		    return [file normalize $filename]
++		} else {
++		    warning "file $filename exists but is not executable"
++		}
+ 	    }
+ 	}
+     }
+-- 
+2.56.0.windows.1
+

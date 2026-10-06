@@ -1,0 +1,42 @@
+From 1c9c7719aacef94e77313a8384be0210ba6b4170 Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Tue, 6 Oct 2026 19:28:02 +0200
+Subject: [PATCH 1/8] win/configure: run config.status with the configure
+ shell, not /bin/sh
+
+---
+ win/configure    | 3 ++-
+ win/configure.in | 3 ++-
+ 2 files changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/win/configure b/win/configure
+index db2187d..92ab6d7 100644
+--- a/win/configure
++++ b/win/configure
+@@ -1320,7 +1320,8 @@ ac_compiler_gnu=$ac_cv_c_compiler_gnu
+ # The following define is needed when building with Cygwin since newer
+ # versions of autoconf incorrectly set SHELL to /bin/bash instead of
+ # /bin/sh. The bash shell seems to suffer from some strange failures.
+-SHELL=/bin/sh
++# posix-env: the configure shell, which need not be /bin/sh.
++SHELL=${CONFIG_SHELL-/bin/sh}
+ 
+ TCL_VERSION=8.6
+ TCL_MAJOR_VERSION=8
+diff --git a/win/configure.in b/win/configure.in
+index 60451b8..761d1b5 100644
+--- a/win/configure.in
++++ b/win/configure.in
+@@ -10,7 +10,8 @@ AC_PREREQ([2.59])
+ # The following define is needed when building with Cygwin since newer
+ # versions of autoconf incorrectly set SHELL to /bin/bash instead of
+ # /bin/sh. The bash shell seems to suffer from some strange failures.
+-SHELL=/bin/sh
++# posix-env: the configure shell, which need not be /bin/sh.
++SHELL=${CONFIG_SHELL-/bin/sh}
+ 
+ TCL_VERSION=8.6
+ TCL_MAJOR_VERSION=8
+-- 
+2.56.0.windows.1
+

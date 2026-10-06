@@ -1,0 +1,25 @@
+From cdefcc3707ca8bf84980b79105344ae9669d54e8 Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Tue, 6 Oct 2026 19:58:54 +0200
+Subject: [PATCH 4/4] dejagnu: run sh commands with CONFIG_SHELL, not /bin/sh
+
+---
+ dejagnu | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/dejagnu b/dejagnu
+index 8ddc59b..d6a5e3f 100644
+--- a/dejagnu
++++ b/dejagnu
+@@ -481,7 +481,7 @@ case $selected_ext in
+     exp)    exec "$expectbin" -- "${commdir}/${command}.exp" ${1+"$@"} ;;
+     gawk)   exec "$gawkbin" -f "${commdir}/${command}.gawk" -- ${1+"$@"} ;;
+     tcl)    exec "$tclbin" "${commdir}/${command}.tcl" ${1+"$@"} ;;
+-    sh)     exec /bin/sh "${commdir}/${command}.sh" ${1+"$@"} ;;
++    sh)     exec "${CONFIG_SHELL-/bin/sh}" "${commdir}/${command}.sh" ${1+"$@"} ;;
+     echo)
+ 	echo command: "${command}"
+ 	echo args: ${1+"$@"}
+-- 
+2.56.0.windows.1
+

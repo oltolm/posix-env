@@ -1,0 +1,84 @@
+From 26ec990111a1781dd6b5159ba247021ea1af04ab Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Tue, 6 Oct 2026 20:29:47 +0200
+Subject: [PATCH 7/8] Empty environment variables on Windows
+
+---
+ generic/tclEnv.c | 47 +++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 47 insertions(+)
+
+diff --git a/generic/tclEnv.c b/generic/tclEnv.c
+index 7d0c61c..82c20aa 100644
+--- a/generic/tclEnv.c
++++ b/generic/tclEnv.c
+@@ -341,6 +341,21 @@ TclSetEnv(
+ 
+     putenv(p);
+     index = TclpFindVariable(name, &length);
++#if defined(_WIN32)
++    if (valueLength == 0) {
++	/*
++	 * posix-env: the C runtime deletes a variable set to "", but
++	 * Windows can hold an empty one, as POSIX systems do: set it there
++	 * (child processes inherit it) and TclGetEnv reads it back.
++	 */
++
++	Tcl_DString nameString;
++
++	SetEnvironmentVariableW(
++		(const WCHAR *)Tcl_WinUtfToTChar(name, -1, &nameString), L"");
++	Tcl_DStringFree(&nameString);
++    }
++#endif
+ #else
+     tenviron[index] = (techar *)p;
+ #endif /* USE_PUTENV */
+@@ -479,6 +494,18 @@ TclUnsetEnv(
+      */
+ 
+     if (index == -1) {
++#if defined(_WIN32)
++	/*
++	 * posix-env: an empty variable exists only in the Windows
++	 * environment (see TclSetEnv).
++	 */
++
++	Tcl_DString nameString;
++
++	SetEnvironmentVariableW(
++		(const WCHAR *)Tcl_WinUtfToTChar(name, -1, &nameString), NULL);
++	Tcl_DStringFree(&nameString);
++#endif
+ 	Tcl_MutexUnlock(&envMutex);
+ 	return;
+     }
+@@ -598,6 +625,26 @@ TclGetEnv(
+ 	}
+ 	Tcl_DStringFree(&envStr);
+     }
++#if defined(_WIN32)
++    if (index == -1) {
++	/*
++	 * posix-env: an empty variable exists only in the Windows
++	 * environment (see TclSetEnv).
++	 */
++
++	Tcl_DString nameString;
++	WCHAR c;
++
++	SetLastError(ERROR_SUCCESS);
++	if (GetEnvironmentVariableW(
++		(const WCHAR *)Tcl_WinUtfToTChar(name, -1, &nameString),
++		&c, 1) == 0 && GetLastError() == ERROR_SUCCESS) {
++	    Tcl_DStringInit(valuePtr);
++	    result = Tcl_DStringValue(valuePtr);
++	}
++	Tcl_DStringFree(&nameString);
++    }
++#endif
+     Tcl_MutexUnlock(&envMutex);
+     return result;
+ }
+-- 
+2.56.0.windows.1
+

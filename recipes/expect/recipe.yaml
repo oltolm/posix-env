@@ -1,0 +1,51 @@
+# Expect for native Windows: the Expect commands that DejaGnu and the GCC
+# and binutils testsuites use, written in Tcl on pipes (upstream Expect
+# needs fork and pseudo-terminals).  The package "Expect" and an expect
+# program that loads it.
+package:
+  name: expect
+  version: 0.1.0
+
+source:
+  - path: expect.tcl
+  - path: pkgIndex.tcl
+  - path: expect.c
+
+build:
+  number: 2
+  script:
+    interpreter: brush
+    content:
+      - mkdir -p "$PREFIX/bin" "$PREFIX/lib/expect5.45.4"
+      - cp expect.tcl pkgIndex.tcl "$PREFIX/lib/expect5.45.4/"
+      - >-
+        gcc -O2 -o "$PREFIX/bin/expect.exe" expect.c -I"$PREFIX/include"
+        -L"$PREFIX/lib" -ltcl86 -static-libgcc
+        "$BUILD_PREFIX/lib/posix-env/utf8-manifest.o"
+
+requirements:
+  build:
+    - posix-env
+  host:
+    - tcl
+  run:
+    - tcl
+    - uutils-coreutils
+
+tests:
+  - files:
+      recipe:
+        - test.exp
+    requirements:
+      run:
+        - posix-env
+    script:
+      interpreter: cmd
+      content:
+        - expect test.exp | findstr /b ok || exit /b 1
+        - echo package require Expect | tclsh || exit /b 1
+        - expect -c "puts [exp_version]; exit" | findstr /b 5.45.4 || exit /b 1
+
+about:
+  license: MIT
+  summary: Expect's commands for DejaGnu, on pipes, for native Windows
