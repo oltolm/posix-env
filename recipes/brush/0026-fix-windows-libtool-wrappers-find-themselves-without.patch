@@ -1,0 +1,178 @@
+From 2e2416597fd91deee3a205e90f94341e79ca1fdf Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Tue, 6 Oct 2026 22:35:09 +0200
+Subject: [PATCH] fix(windows): libtool wrappers find themselves without
+ argv[0]
+
+libtool compiles a wrapper program for each uninstalled executable in a
+build tree (gas/as-new.exe runs gas/.libs/as-new.exe with the build's
+DLL directories on PATH).  The wrapper finds itself through argv[0],
+which on Windows is whatever its starter wrote: dlltool, gcc and others
+start "../gas/as-new", argv[0] has no ".exe", and the wrapper fails with
+"Couldn't find ../gas/as-new".
+
+Every package carries its own ltmain.sh, so when the libtool script
+prints the wrapper source (func_emit_cwrapperexe_src), replace the
+faulty line in the here-document: on Windows the wrapper asks the C
+runtime for its own path (_pgmptr).  libtool 2.2 to 2.6 have the same
+line.
+
+Assisted-by: Claude Code:claude-opus-5-5
+---
+ brush-core/src/compat.rs                      | 38 +++++++++++++++
+ .../compat/libtool-cwrapper-find-self-fixed.c |  7 +++
+ brush-core/src/interp.rs                      | 11 +++++
+ brush-core/tests/windows_compat_tests.rs      | 48 +++++++++++++++++++
+ 4 files changed, 104 insertions(+)
+ create mode 100644 brush-core/src/compat/libtool-cwrapper-find-self-fixed.c
+
+diff --git a/brush-core/src/compat.rs b/brush-core/src/compat.rs
+index 2b877432..b6e63924 100644
+--- a/brush-core/src/compat.rs
++++ b/brush-core/src/compat.rs
+@@ -71,6 +71,29 @@ const CASES: &[Shim] = &[
+     },
+ ];
+ 
++/// Faulty text in the here-documents of a function, and its replacement.
++struct HereDocShim {
++    function: &'static str,
++    faulty: &'static str,
++    fixed: &'static str,
++}
++
++/// Here-document text to replace.  The function definitions that print it
++/// are long and differ between versions; the faulty line does not.
++const HERE_DOCS: &[HereDocShim] = &[
++    // libtool 2.2 to 2.6: the wrapper programs it compiles for uninstalled
++    // executables (the `.libs` of a build tree) find themselves through
++    // argv[0], which on Windows need not name their file: started as
++    // `../gas/as-new` (by dlltool, gcc, make), they fail with "Couldn't
++    // find ../gas/as-new".  The fixed wrapper asks the C runtime for its
++    // own path (`_pgmptr`).
++    HereDocShim {
++        function: "func_emit_cwrapperexe_src",
++        faulty: "  tmp_pathspec = find_executable (argv[0]);\n",
++        fixed: include_str!("compat/libtool-cwrapper-find-self-fixed.c"),
++    },
++];
++
+ /// A parsed shim: a cheap key to filter candidates, the faulty code's
+ /// normalized form, and the replacement.
+ struct Parsed<T> {
+@@ -157,6 +180,21 @@ pub(crate) fn function_replacement(
+     find(functions(), &def.fname.value, def)
+ }
+ 
++/// Returns the fixed contents of a here-document with known-faulty text, given
++/// the innermost function running.
++pub(crate) fn here_doc_replacement(function: Option<&str>, doc: &str) -> Option<String> {
++    let function = function?;
++    let mut fixed: Option<String> = None;
++    for shim in HERE_DOCS.iter().filter(|shim| shim.function == function) {
++        let text = fixed.as_deref().unwrap_or(doc);
++        if text.contains(shim.faulty) {
++            tracing::debug!(target: trace_categories::COMMANDS, "compat: replacing known-faulty here-document text in {function}");
++            fixed = Some(text.replace(shim.faulty, shim.fixed));
++        }
++    }
++    fixed
++}
++
+ /// Returns the replacement for a known-faulty case command.
+ pub(crate) fn case_replacement(
+     cmd: &ast::CaseClauseCommand,
+diff --git a/brush-core/src/compat/libtool-cwrapper-find-self-fixed.c b/brush-core/src/compat/libtool-cwrapper-find-self-fixed.c
+new file mode 100644
+index 00000000..4ee945f2
+--- /dev/null
++++ b/brush-core/src/compat/libtool-cwrapper-find-self-fixed.c
+@@ -0,0 +1,7 @@
++  /* Windows: the program's own file, which argv[0] need not name (a
++     program started as "dir/prog" gets no ".exe" in argv[0]).  */
++#if defined _WIN32 && !defined __CYGWIN__
++  tmp_pathspec = find_executable (_pgmptr);
++#else
++  tmp_pathspec = find_executable (argv[0]);
++#endif
+diff --git a/brush-core/src/interp.rs b/brush-core/src/interp.rs
+index 06d7e8b0..fa6b9fb2 100644
+--- a/brush-core/src/interp.rs
++++ b/brush-core/src/interp.rs
+@@ -1944,6 +1944,17 @@ pub(crate) async fn setup_redirect(
+                 io_here.doc.flatten()
+             };
+ 
++            #[cfg(windows)]
++            let io_here_doc = crate::compat::here_doc_replacement(
++                shell
++                    .call_stack()
++                    .iter_function_calls()
++                    .next()
++                    .map(|call| call.function_name.as_str()),
++                &io_here_doc,
++            )
++            .unwrap_or(io_here_doc);
++
+             let f = setup_open_file_with_contents(io_here_doc.as_str())?;
+ 
+             params.open_files.set_fd(fd_num, f);
+diff --git a/brush-core/tests/windows_compat_tests.rs b/brush-core/tests/windows_compat_tests.rs
+index 9cbad295..306b775f 100644
+--- a/brush-core/tests/windows_compat_tests.rs
++++ b/brush-core/tests/windows_compat_tests.rs
+@@ -159,3 +159,51 @@ async fn gettext_po_srcdir_relative() -> Result<()> {
+     );
+     Ok(())
+ }
++
++/// A libtool wrapper template whose `main` finds the program through argv[0].
++const CWRAPPER_MAIN: &str = r#"
++  newargz = XMALLOC (char *, argc + 1);
++  tmp_pathspec = find_executable (argv[0]);
++  if (tmp_pathspec == NULL)
++"#;
++
++/// Prints `CWRAPPER_MAIN` from a function named `name`, as libtool's
++/// `func_emit_cwrapperexe_src` does, and returns what it printed.
++async fn emitted_by(name: &str) -> Result<String> {
++    let mut shell = brush_core::Shell::builder().build().await?;
++    run(
++        &mut shell,
++        &format!("{name} ()\n{{\n  cat <<\"EOF\"{CWRAPPER_MAIN}EOF\n}}\nsrc=$({name})\n"),
++    )
++    .await?;
++    Ok(shell.env_str("src").expect("src not set").to_string())
++}
++
++/// libtool's wrappers find themselves through argv[0], which on Windows need
++/// not name their file; the wrapper source asks for `_pgmptr` instead.
++#[tokio::test]
++async fn libtool_cwrapper_finds_itself_by_pgmptr() -> Result<()> {
++    let src = emitted_by("func_emit_cwrapperexe_src").await?;
++    assert!(
++        src.contains("tmp_pathspec = find_executable (_pgmptr);"),
++        "{src}"
++    );
++    assert!(
++        src.contains("#if defined _WIN32 && !defined __CYGWIN__"),
++        "{src}"
++    );
++    assert!(src.contains("if (tmp_pathspec == NULL)"), "{src}");
++    Ok(())
++}
++
++/// The same text printed by another function is kept.
++#[tokio::test]
++async fn other_here_documents_are_kept() -> Result<()> {
++    let src = emitted_by("emit_something_else").await?;
++    assert!(!src.contains("_pgmptr"), "{src}");
++    assert!(
++        src.contains("tmp_pathspec = find_executable (argv[0]);"),
++        "{src}"
++    );
++    Ok(())
++}
+-- 
+2.56.0.windows.1
+

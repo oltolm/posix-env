@@ -1,0 +1,63 @@
+From 6020b54d4d0fac3b6bc83b94c10eca2677e1d41a Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Tue, 6 Oct 2026 20:10:27 +0200
+Subject: [PATCH] fix(windows): start a program by its file name, extension
+ included
+
+`../as-new` started `..\as-new`; CreateProcess finds `as-new.exe`, but
+the child's argv[0] stays without the extension.  libtool's wrapper
+programs (binutils' as-new, ld-new, objdump in the build tree) find
+themselves through argv[0] and failed: "Couldn't find ...\as-new".
+The program path is now the file that exists, as MSYS passes it.
+
+Assisted-by: Claude Code:claude-opus-5-5
+---
+ brush-core/src/commands.rs                      | 11 +++++++----
+ brush-shell/tests/cases/brush/command_path.yaml | 10 ++++++++++
+ 2 files changed, 17 insertions(+), 4 deletions(-)
+
+diff --git a/brush-core/src/commands.rs b/brush-core/src/commands.rs
+index afd3f2c5..d7f5cfa3 100644
+--- a/brush-core/src/commands.rs
++++ b/brush-core/src/commands.rs
+@@ -221,12 +221,15 @@ pub fn compose_std_command<S: AsRef<OsStr>, SE: extensions::ShellExtensions>(
+         cmd.arg(command_name);
+     } else {
+         // Windows resolves a relative program path against our process's working directory,
+-        // not the child's; `cd` changes only the shell's.
++        // not the child's; `cd` changes only the shell's.  The path names the file itself,
++        // extension included (`../as-new` starts `..\as-new.exe`): it is also the child's
++        // argv[0], and programs that find themselves through it (libtool's wrappers) look
++        // for that file.
+         #[cfg(windows)]
+         if crate::sys::fs::contains_path_separator(command_name) {
+-            cmd = std::process::Command::new(windows_program_path(
+-                &context.shell.absolute_path(command_name),
+-            ));
++            let path = context.shell.absolute_path(command_name);
++            let path = crate::sys::fs::resolve_executable(path.clone()).unwrap_or(path);
++            cmd = std::process::Command::new(windows_program_path(&path));
+         } else {
+             cmd = std::process::Command::new(command_name);
+         }
+diff --git a/brush-shell/tests/cases/brush/command_path.yaml b/brush-shell/tests/cases/brush/command_path.yaml
+index 68484554..6058a812 100644
+--- a/brush-shell/tests/cases/brush/command_path.yaml
++++ b/brush-shell/tests/cases/brush/command_path.yaml
+@@ -19,3 +19,13 @@ cases:
+       ./script
+     expected_stdout: |
+       ./script
++
++  # A program run by a path without its extension (Windows) gets the file
++  # itself as argv[0]; libtool's wrapper programs find themselves by it.
++  - name: "a program run by a path gets an existing file as argv[0]"
++    stdin: |
++      cd "${BASH%[/\\]*}"
++      b=${BASH##*[/\\]}
++      ./"${b%.exe}" -c 'test -f "$0" && echo file'
++    expected_stdout: |
++      file
+-- 
+2.56.0.windows.1
+
