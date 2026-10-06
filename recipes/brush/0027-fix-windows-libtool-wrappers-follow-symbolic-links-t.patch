@@ -1,0 +1,130 @@
+From 70d7870041a5bbe82a03f7bd1f4f6d7d8b284923 Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Tue, 6 Oct 2026 23:09:18 +0200
+Subject: [PATCH] fix(windows): libtool wrappers follow symbolic links to
+ themselves
+
+libtool's wrapper programs follow a link to themselves (chase_symlinks)
+only where <sys/stat.h> defines S_ISLNK, which MinGW's does not.
+Started through a link (binutils' testsuite links tmpdir/gas/as.exe to
+gas/as-new.exe), a wrapper looked for its program in the link's
+directory and exited with 127.  On Windows the rewritten wrapper source
+takes the file's final path (GetFinalPathNameByHandle).
+
+Assisted-by: Claude Code:claude-opus-5-5
+---
+ brush-core/src/compat.rs                      | 10 ++++++
+ .../libtool-cwrapper-chase-symlinks-fixed.c   | 36 +++++++++++++++++++
+ brush-core/tests/windows_compat_tests.rs      | 21 ++++++++++-
+ 3 files changed, 66 insertions(+), 1 deletion(-)
+ create mode 100644 brush-core/src/compat/libtool-cwrapper-chase-symlinks-fixed.c
+
+diff --git a/brush-core/src/compat.rs b/brush-core/src/compat.rs
+index b6e63924..fbc6922a 100644
+--- a/brush-core/src/compat.rs
++++ b/brush-core/src/compat.rs
+@@ -92,6 +92,16 @@ const HERE_DOCS: &[HereDocShim] = &[
+         faulty: "  tmp_pathspec = find_executable (argv[0]);\n",
+         fixed: include_str!("compat/libtool-cwrapper-find-self-fixed.c"),
+     },
++    // The same wrappers follow symbolic links to themselves only where
++    // <sys/stat.h> has S_ISLNK, which MinGW's lacks: started through a link
++    // (binutils' testsuite links tmpdir/gas/as.exe to gas/as-new.exe), they
++    // look for the program in the link's directory and exit with 127.  On
++    // Windows they now take the file's final path.
++    HereDocShim {
++        function: "func_emit_cwrapperexe_src",
++        faulty: "#ifndef S_ISLNK\n  return xstrdup (pathspec);\n#else\n",
++        fixed: include_str!("compat/libtool-cwrapper-chase-symlinks-fixed.c"),
++    },
+ ];
+ 
+ /// A parsed shim: a cheap key to filter candidates, the faulty code's
+diff --git a/brush-core/src/compat/libtool-cwrapper-chase-symlinks-fixed.c b/brush-core/src/compat/libtool-cwrapper-chase-symlinks-fixed.c
+new file mode 100644
+index 00000000..92e7cde1
+--- /dev/null
++++ b/brush-core/src/compat/libtool-cwrapper-chase-symlinks-fixed.c
+@@ -0,0 +1,36 @@
++#if defined _WIN32 && !defined __CYGWIN__
++  /* Windows: the file's final path, through symbolic links (the wrapper
++     may be started through a link to it, which _pgmptr names).  */
++  {
++    extern __declspec (dllimport) void *__stdcall
++      CreateFileA (const char *, unsigned long, unsigned long, void *,
++		   unsigned long, unsigned long, void *);
++    extern __declspec (dllimport) unsigned long __stdcall
++      GetFinalPathNameByHandleA (void *, char *, unsigned long, unsigned long);
++    extern __declspec (dllimport) int __stdcall CloseHandle (void *);
++    char final[LT_PATHMAX];
++    unsigned long n = 0;
++    /* GENERIC_READ 0, share read/write/delete, OPEN_EXISTING,
++       FILE_FLAG_BACKUP_SEMANTICS.  */
++    void *h = CreateFileA (pathspec, 0, 7, 0, 3, 0x02000000, 0);
++    if (h != (void *) -1)
++      {
++	n = GetFinalPathNameByHandleA (h, final, sizeof final, 0);
++	CloseHandle (h);
++      }
++    if (n > 0 && n < sizeof final)
++      {
++	if (strncmp (final, "\\\\?\\UNC\\", 8) == 0)
++	  {
++	    final[6] = '\\';
++	    return xstrdup (final + 6);
++	  }
++	if (strncmp (final, "\\\\?\\", 4) == 0)
++	  return xstrdup (final + 4);
++	return xstrdup (final);
++      }
++  }
++  return xstrdup (pathspec);
++#elif !defined S_ISLNK
++  return xstrdup (pathspec);
++#else
+diff --git a/brush-core/tests/windows_compat_tests.rs b/brush-core/tests/windows_compat_tests.rs
+index 306b775f..98189c8c 100644
+--- a/brush-core/tests/windows_compat_tests.rs
++++ b/brush-core/tests/windows_compat_tests.rs
+@@ -160,11 +160,20 @@ async fn gettext_po_srcdir_relative() -> Result<()> {
+     Ok(())
+ }
+ 
+-/// A libtool wrapper template whose `main` finds the program through argv[0].
++/// Parts of a libtool wrapper template: `main` finds the program through
++/// argv[0], and `chase_symlinks` follows links only with `S_ISLNK`.
+ const CWRAPPER_MAIN: &str = r#"
+   newargz = XMALLOC (char *, argc + 1);
+   tmp_pathspec = find_executable (argv[0]);
+   if (tmp_pathspec == NULL)
++
++char *
++chase_symlinks (const char *pathspec)
++{
++#ifndef S_ISLNK
++  return xstrdup (pathspec);
++#else
++  char buf[LT_PATHMAX];
+ "#;
+ 
+ /// Prints `CWRAPPER_MAIN` from a function named `name`, as libtool's
+@@ -196,6 +205,16 @@ async fn libtool_cwrapper_finds_itself_by_pgmptr() -> Result<()> {
+     Ok(())
+ }
+ 
++/// The wrappers follow symbolic links to themselves on Windows too.
++#[tokio::test]
++async fn libtool_cwrapper_chases_symlinks() -> Result<()> {
++    let src = emitted_by("func_emit_cwrapperexe_src").await?;
++    assert!(src.contains("GetFinalPathNameByHandleA (h, final"), "{src}");
++    assert!(src.contains("#elif !defined S_ISLNK"), "{src}");
++    assert!(src.contains("char buf[LT_PATHMAX];"), "{src}");
++    Ok(())
++}
++
+ /// The same text printed by another function is kept.
+ #[tokio::test]
+ async fn other_here_documents_are_kept() -> Result<()> {
+-- 
+2.56.0.windows.1
+

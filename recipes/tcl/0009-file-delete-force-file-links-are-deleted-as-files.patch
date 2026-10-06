@@ -1,0 +1,35 @@
+From 75063254df40f347182114cddc9cfb1c2499ad7e Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Tue, 6 Oct 2026 23:08:21 +0200
+Subject: [PATCH] file delete -force: file links are deleted as files
+
+---
+ win/tclWinFCmd.c | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/win/tclWinFCmd.c b/win/tclWinFCmd.c
+index b0e6091..e52f75c 100644
+--- a/win/tclWinFCmd.c
++++ b/win/tclWinFCmd.c
+@@ -1440,6 +1440,18 @@ TraversalDelete(
+ 	}
+ 	break;
+     case DOTREE_LINK:
++	/*
++	 * posix-env: a symbolic link to a file (or to nothing) is deleted as
++	 * a file; only directory links and junctions are removed as
++	 * directories.
++	 */
++
++	if (!(GetFileAttributesW(nativeSrc) & FILE_ATTRIBUTE_DIRECTORY)) {
++	    if (TclpDeleteFile(nativeSrc) == TCL_OK) {
++		return TCL_OK;
++	    }
++	    break;
++	}
+ 	if (DoRemoveJustDirectory(nativeSrc, 0, NULL) == TCL_OK) {
+ 	    return TCL_OK;
+ 	}
+-- 
+2.56.0.windows.1
+

@@ -30,9 +30,12 @@ source:
     # posix-env: an open file can be deleted or renamed, as on POSIX
     # systems (binutils' windres test deletes files it still reads).
     - 0008-Open-files-can-be-deleted-and-renamed-FILE_SHARE_DEL.patch
+    # file delete -force removed file links as directories and failed
+    # (binutils' ld testsuite deletes tmpdir/ld with its links).
+    - 0009-file-delete-force-file-links-are-deleted-as-files.patch
 
 build:
-  number: 3
+  number: 4
   script:
     interpreter: brush
     file: build.sh

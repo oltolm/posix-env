@@ -30,3 +30,12 @@ if { [which sh] != 0 } {
 } else {
     fail "which"
 }
+
+# gcc -o prog writes prog.exe; loading "prog" runs it (patch 0006).
+file copy -force [which sh] prog.exe
+set r [remote_load target ./prog "-c {exit 0}"]
+if { [lindex $r 0] eq "pass" } {
+    pass "load PROG as PROG.exe"
+} else {
+    fail "load PROG as PROG.exe: $r"
+}

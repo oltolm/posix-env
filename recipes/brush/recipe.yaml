@@ -38,12 +38,13 @@ source:
       - 0024-fix-tokenizer-follow-case-commands-in-command-substi.patch
       - 0025-fix-windows-start-a-program-by-its-file-name-extensi.patch
       - 0026-fix-windows-libtool-wrappers-find-themselves-without.patch
+      - 0027-fix-windows-libtool-wrappers-follow-symbolic-links-t.patch
   - url: https://github.com/reubeno/brush/releases/download/brush-shell-v0.4.0/brush-docs.tar.gz
     sha256: 1070fa3a9470927c0c3d9c5417151f1b8f72317b42bed21f33e5fd4f3dad3332
     target_directory: docs
 
 build:
-  number: 6
+  number: 7
   script:
     interpreter: brush
     file: build.sh

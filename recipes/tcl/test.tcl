@@ -61,6 +61,13 @@ check "#! argument" [catch {exec ./script3} msg] 1
 # A symbolic link to a #! script (if links can be made here).
 if {![catch {file link -symbolic scriptlink [file normalize script]}]} {
     check "symlink to #!" [exec ./scriptlink y] "1 y"
+
+    # A directory with file links, one dangling, is deleted (0009).
+    file mkdir tree
+    file link -symbolic tree/good [file normalize script]
+    exec cmd /c mklink tree\\dangling nothing > NUL
+    file delete -force tree
+    check "delete a tree with file links" [file exists tree] 0
 }
 
 # /bin/NAME and /usr/bin/NAME are NAME in PATH, as on #! lines.

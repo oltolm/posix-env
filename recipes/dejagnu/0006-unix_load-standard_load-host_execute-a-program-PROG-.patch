@@ -1,0 +1,72 @@
+From 627653428f12006c7cd9b9193569ebb3cb649e72 Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Tue, 6 Oct 2026 23:20:21 +0200
+Subject: [PATCH] unix_load, standard_load, host_execute: a program PROG is
+ PROG.exe on Windows
+
+---
+ config/unix.exp |  6 +++++-
+ lib/dejagnu.exp | 11 +++++++++--
+ lib/remote.exp  |  5 ++++-
+ 3 files changed, 18 insertions(+), 4 deletions(-)
+
+diff --git a/config/unix.exp b/config/unix.exp
+index dc3f781..b7ec269 100644
+--- a/config/unix.exp
++++ b/config/unix.exp
+@@ -54,7 +54,11 @@ proc unix_load { dest prog args } {
+ 	set inp ""
+     }
+ 
+-    if {![file exists $prog]} then {
++    # On Windows, the program PROG is the file PROG.exe (gcc -o prog writes
++    # prog.exe).
++    if {![file exists $prog]
++	&& !($::tcl_platform(platform) eq "windows"
++	     && [file exists $prog.exe])} then {
+ 	# We call both here because this should never happen.
+ 	perror "$prog does not exist in unix_load."
+ 	verbose -log "$prog does not exist." 3
+diff --git a/lib/dejagnu.exp b/lib/dejagnu.exp
+index 3fdca76..9c4d428 100644
+--- a/lib/dejagnu.exp
++++ b/lib/dejagnu.exp
+@@ -119,10 +119,17 @@ proc host_execute {args} {
+ 
+     verbose "The executable is $executable" 2
+     verbose "The arguments are $arguments" 2
+-    if { [file exists "./${executable}"] } {
++    # On Windows, the program PROG is the file PROG.exe.
++    set exe ""
++    if { $::tcl_platform(platform) eq "windows" } {
++	set exe .exe
++    }
++    if { [file exists "./${executable}"]
++	 || ($exe ne "" && [file exists "./${executable}$exe"]) } {
+ 	set executable "./${executable}"
+     }
+-    if { ![file exists $executable] } {
++    if { ![file exists $executable]
++	 && !($exe ne "" && [file exists $executable$exe]) } {
+ 	perror "The executable, \"$executable\" is missing" 0
+ 	return "No source file found"
+     }
+diff --git a/lib/remote.exp b/lib/remote.exp
+index 4089e19..df79f5f 100644
+--- a/lib/remote.exp
++++ b/lib/remote.exp
+@@ -1096,7 +1096,10 @@ proc standard_load { dest prog args } {
+ 	set inp ""
+     }
+ 
+-    if {![file exists $prog]} then {
++    # On Windows, the program PROG is the file PROG.exe.
++    if {![file exists $prog]
++	&& !($::tcl_platform(platform) eq "windows"
++	     && [file exists $prog.exe])} then {
+ 	# We call both here because this should never happen.
+ 	perror "$prog does not exist in standard_load."
+ 	verbose -log "$prog does not exist." 3
+-- 
+2.56.0.windows.1
+

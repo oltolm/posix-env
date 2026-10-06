@@ -21,9 +21,11 @@ source:
     # Testsuites look for $objdir/../as-new, gcc/xgcc and the like
     # (Cygwin's Tcl finds as-new.exe by that name).
     - 0005-findfile-lookfor_file-a-program-NAME-is-NAME.exe-on-.patch
+    # Programs that gcc -o PROG linked as PROG.exe were "missing".
+    - 0006-unix_load-standard_load-host_execute-a-program-PROG-.patch
 
 build:
-  number: 2
+  number: 3
   script:
     interpreter: brush
     content:
