@@ -15,9 +15,12 @@ source:
     - 0002-dd-no-setlocale-for-conv-lcase-ucase-on-Windows.patch
     # env could not start #! scripts (libtool runs its helpers through env).
     - 0003-env-run-scripts-through-their-interpreter-on-Windows.patch
+    # mktemp printed "./confXXXXXX" as ".\conf...", which autoconf 2.59's
+    # config.status lost in eval.
+    - 0004-mktemp-print-the-name-as-the-template-gives-it-on-Wi.patch
 
 build:
-  number: 4
+  number: 5
   script:
     interpreter: brush
     file: build.sh
@@ -43,6 +46,8 @@ tests:
         - env ./script a | findstr /b /c:"./script a" || exit /b 1
         - set "PATH=%CD%;%PATH%"
         - env script b | findstr /c:"/script b" || exit /b 1
+        # mktemp prints the name as the template gives it (patch 0004).
+        - mktemp -u ./confXXXXXX | findstr /b /c:"./conf" || exit /b 1
 
 about:
   homepage: https://github.com/uutils/coreutils
