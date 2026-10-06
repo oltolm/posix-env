@@ -18,9 +18,12 @@ source:
     # mktemp printed "./confXXXXXX" as ".\conf...", which autoconf 2.59's
     # config.status lost in eval.
     - 0004-mktemp-print-the-name-as-the-template-gives-it-on-Wi.patch
+    # ln -s ../../ld-new tmpdir/ld/ld linked to nothing: as Cygwin does, a
+    # link to program NAME is a link to NAME.exe, named LINK.exe.
+    - 0005-ln-link-programs-by-their-.exe-name-on-Windows.patch
 
 build:
-  number: 5
+  number: 8
   script:
     interpreter: brush
     file: build.sh
@@ -31,7 +34,10 @@ requirements:
 
 tests:
   # The post-link script has run: the utilities exist under their own names.
-  - script:
+  - requirements:
+      run:
+        - brush
+    script:
       interpreter: cmd
       content:
         - coreutils --version
@@ -48,6 +54,8 @@ tests:
         - env script b | findstr /c:"/script b" || exit /b 1
         # mktemp prints the name as the template gives it (patch 0004).
         - mktemp -u ./confXXXXXX | findstr /b /c:"./conf" || exit /b 1
+        # ln links program NAME as NAME.exe (patch 0005).
+        - sh -c "cp \"$(command -v sh)\" prog.exe && mkdir d && ln -s ../prog d/ld && test -L d/ld.exe && d/ld.exe -c true" || exit /b 1
 
 about:
   homepage: https://github.com/uutils/coreutils

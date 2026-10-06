@@ -1,0 +1,140 @@
+From b4727f143928e4dbd62fb431e6b9314d849c4f02 Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Tue, 6 Oct 2026 22:56:42 +0200
+Subject: [PATCH] ln: link programs by their .exe name on Windows
+
+A program NAME is the file NAME.exe on Windows, and only names ending in
+.exe can be run.  Build systems link programs by their names: binutils'
+testsuite runs "ln -s ../../ld-new tmpdir/ld/ld" (gcc -B then looks for
+ld.exe) and "ln -sf ../../../gas/as-new tmpdir/gas/as.exe"; both links
+pointed to nothing.  As Cygwin does, a link to NAME where only NAME.exe
+exists links to NAME.exe, and a link to a .exe file gets .exe added to
+its name.  Symbolic and hard links.
+---
+ src/uu/ln/src/ln.rs      | 43 +++++++++++++++++++++++++++++++++
+ tests/by-util/test_ln.rs | 51 ++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 94 insertions(+)
+
+diff --git a/src/uu/ln/src/ln.rs b/src/uu/ln/src/ln.rs
+index e8ee356..d16d995 100644
+--- a/src/uu/ln/src/ln.rs
++++ b/src/uu/ln/src/ln.rs
+@@ -393,6 +393,11 @@ fn is_same_entry(src: &Path, dst: &Path) -> bool {
+ /// This is made public to allow other apps to use `ln` as a library.
+ #[allow(clippy::cognitive_complexity)]
+ pub fn link(src: &Path, dst: &Path, settings: &Settings) -> LnResult<()> {
++    #[cfg(windows)]
++    let (src_buf, dst_buf) = windows_program_names(src, dst, settings);
++    #[cfg(windows)]
++    let (src, dst) = (src_buf.as_path(), dst_buf.as_path());
++
+     let mut backup_path = None;
+     // Remove an existing destination only after a link attempt fails with EEXIST.
+     let mut overwrite_on_conflict = false;
+@@ -515,6 +520,44 @@ pub fn link(src: &Path, dst: &Path, settings: &Settings) -> LnResult<()> {
+     Ok(())
+ }
+ 
++/// On Windows a program `NAME` is the file `NAME.exe`, and only a name ending
++/// in `.exe` can be run.  As Cygwin does, a link to `NAME` where only
++/// `NAME.exe` exists links to `NAME.exe`, and a link to a `.exe` file gets
++/// `.exe` added to its name: build systems written for POSIX link programs
++/// by their names (`ln -s ../../ld-new tmpdir/ld/ld`, which gcc -B looks
++/// for as `ld.exe`).
++#[cfg(windows)]
++fn windows_program_names(src: &Path, dst: &Path, settings: &Settings) -> (PathBuf, PathBuf) {
++    fn with_exe(path: &Path) -> PathBuf {
++        let mut name = path.as_os_str().to_owned();
++        name.push(".exe");
++        PathBuf::from(name)
++    }
++    fn is_exe(path: &Path) -> bool {
++        path.extension()
++            .is_some_and(|ext| ext.eq_ignore_ascii_case("exe"))
++    }
++
++    // A symbolic link's relative target is relative to the link's directory.
++    let resolved = if settings.symbolic && !settings.relative && src.is_relative() {
++        dst.parent()
++            .map_or_else(|| src.to_path_buf(), |dir| dir.join(src))
++    } else {
++        src.to_path_buf()
++    };
++    let src = if fs::symlink_metadata(&resolved).is_err() && with_exe(&resolved).is_file() {
++        with_exe(src)
++    } else {
++        src.to_path_buf()
++    };
++    let dst = if is_exe(&src) && !is_exe(dst) && !dst.is_dir() {
++        with_exe(dst)
++    } else {
++        dst.to_path_buf()
++    };
++    (src, dst)
++}
++
+ #[cfg(windows)]
+ pub fn symlink<P1: AsRef<Path>, P2: AsRef<Path>>(src: P1, dst: P2) -> io::Result<()> {
+     uucore::fs::symlink(src.as_ref(), dst.as_ref())
+diff --git a/tests/by-util/test_ln.rs b/tests/by-util/test_ln.rs
+index 9264e30..5435e64 100644
+--- a/tests/by-util/test_ln.rs
++++ b/tests/by-util/test_ln.rs
+@@ -1319,3 +1319,54 @@ fn test_hard_link_force_failed_link_keeps_destination() {
+     assert!(at.file_exists("dst"));
+     assert_eq!(at.read("dst"), "keep\n");
+ }
++
++/// Windows: a link to program NAME, where only NAME.exe exists, links to
++/// NAME.exe and is named LINK.exe (binutils' testsuite links
++/// `../../ld-new` as `tmpdir/ld/ld`), as Cygwin does.
++#[cfg(windows)]
++#[test]
++fn test_symlink_to_program_without_exe() {
++    let (at, mut ucmd) = at_and_ucmd!();
++    at.touch("prog.exe");
++    at.mkdir("d");
++    ucmd.args(&["-s", "../prog", "d/link"]).succeeds().no_stderr();
++    assert!(!at.is_symlink("d/link"));
++    assert!(at.is_symlink("d/link.exe"));
++    assert_eq!(at.resolve_link("d/link.exe"), stored_target("../prog.exe"));
++}
++
++/// Windows: a link named LINK.exe to NAME, where only NAME.exe exists
++/// (binutils' `ln -sf ../../../gas/as-new tmpdir/gas/as.exe`).
++#[cfg(windows)]
++#[test]
++fn test_symlink_exe_name_to_program_without_exe() {
++    let (at, mut ucmd) = at_and_ucmd!();
++    at.touch("prog.exe");
++    at.mkdir("d");
++    ucmd.args(&["-sf", "../prog", "d/as.exe"]).succeeds().no_stderr();
++    assert_eq!(at.resolve_link("d/as.exe"), stored_target("../prog.exe"));
++}
++
++/// Windows: a hard link to program NAME is LINK.exe as well.
++#[cfg(windows)]
++#[test]
++fn test_hard_link_to_program_without_exe() {
++    let (at, mut ucmd) = at_and_ucmd!();
++    at.write("prog.exe", "program");
++    ucmd.args(&["prog", "link"]).succeeds().no_stderr();
++    assert_eq!(at.read("link.exe"), "program");
++    assert!(!at.file_exists("link"));
++}
++
++/// Windows: a target that exists under its own name is kept, and a link to
++/// a file that is no program keeps its name.
++#[cfg(windows)]
++#[test]
++fn test_symlink_to_existing_name_is_kept() {
++    let (at, mut ucmd) = at_and_ucmd!();
++    at.touch("script");
++    at.touch("script.exe");
++    ucmd.args(&["-s", "script", "link"]).succeeds().no_stderr();
++    assert!(at.is_symlink("link"));
++    assert_eq!(at.resolve_link("link"), "script");
++}
+-- 
+2.56.0.windows.1
+
