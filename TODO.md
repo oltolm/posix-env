@@ -84,7 +84,7 @@ in a local channel only; no package from any conda channel. The toolchain
 - [x] posix-env build 13: config.site adds `-D_INTL_NO_DEFINE_MACRO_SETLOCALE`; `<libintl.h>` redirected setlocale to libintl_setlocale, which takes `C` as English UTF-8 (LC_ALL=C gave multibyte characters). Build 14: config.site adds each flag once (nested configures such as binutils' read it again: objects linked twice).
 - [x] Rebuild the NLS packages (make, m4, xz, gettext-tools, diffutils, ...) with posix-env build 13+, so that LC_ALL=C is single-byte in them too.
 - [x] brush: a file without `#!` that is not an executable must run as a shell script (POSIX, ENOEXEC); Windows reports error 193 (gawk's randtest).
-- [ ] uutils `ls -i` prints no inode numbers on Windows (the file index is available through GetFileInformationByHandle); gawk's readdir test builds its expected output from it.
+- [x] uutils `ls -i` prints no inode numbers on Windows (the file index is available through GetFileInformationByHandle); gawk's readdir test builds its expected output from it.
 - [x] `tools\posix-shell.cmd update`: updates the environment from the local channel and adds missing default packages.
 - [x] Launcher commands (2026-10-06): `posix-shell run [COMMAND...]` (the shell, or a command in the environment; no arguments print the help, except when double-clicked), `install NAME...`, `remove NAME...`, `list`, `update`, `help` (also `-h`, `--help`, `/?`). The Start menu entry and Terminal profile run `posix-shell run` (rewritten when they predate it).
 - [x] posix-env build 18: `posix-env COMMAND` in the shell forwards to the launcher (`POSIX_ENV_LAUNCHER`, set by `posix-shell run`).

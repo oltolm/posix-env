@@ -1,0 +1,183 @@
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Subject: [PATCH] ls: print the Windows file index for --inode
+
+Windows has no POSIX inode in Metadata, so ls compiled all --inode output
+out on that platform.  Use uucore's FileInformation, which opens the path
+and combines BY_HANDLE_FILE_INFORMATION's high and low file-index words.
+This also gives every hard link to a file the same value.
+---
+ src/uu/ls/src/config.rs    |  4 ++--
+ src/uu/ls/src/display.rs   | 40 ++++++++++++++++++++++++++++++----------
+ tests/by-util/test_ls.rs   | 27 +++++++++++++++++++++++++++
+ 3 files changed, 62 insertions(+), 13 deletions(-)
+
+diff --git a/src/uu/ls/src/config.rs b/src/uu/ls/src/config.rs
+--- a/src/uu/ls/src/config.rs
++++ b/src/uu/ls/src/config.rs
+@@ -216,7 +216,7 @@ pub struct Config {
+     pub(crate) size_format: SizeFormat,
+     pub(crate) directory: bool,
+     pub(crate) time: MetadataTimeField,
+-    #[cfg(unix)]
++    #[cfg(any(unix, windows))]
+     pub(crate) inode: bool,
+     pub(crate) color: Option<LsColors>,
+     pub(crate) long: LongFormat,
+@@ -1048,7 +1048,7 @@ impl Config {
+             directory: options.get_flag(options::DIRECTORY),
+             time,
+             color,
+-            #[cfg(unix)]
++            #[cfg(any(unix, windows))]
+             inode: options.get_flag(options::INODE),
+             long,
+             alloc_size: options.get_flag(options::size::ALLOCATION_SIZE),
+diff --git a/src/uu/ls/src/display.rs b/src/uu/ls/src/display.rs
+--- a/src/uu/ls/src/display.rs
++++ b/src/uu/ls/src/display.rs
+@@ -34,5 +34,7 @@ use term_grid::{DEFAULT_SEPARATOR_SIZE, Direction, Filling, Grid, GridOptions};
+ #[cfg(unix)]
+ use uucore::entries;
++#[cfg(windows)]
++use uucore::fs::FileInformation;
+ #[cfg(all(unix, not(any(target_vendor = "apple", target_os = "android"))))]
+ use uucore::fsxattr::has_acl;
+ #[cfg(unix)]
+@@ -74,7 +76,7 @@ pub(crate) struct LongFormat {
+ }
+
+ pub(crate) struct PaddingCollection {
+-    #[cfg(unix)]
++    #[cfg(any(unix, windows))]
+     pub(crate) inode: usize,
+     pub(crate) link_count: usize,
+     pub(crate) uname: usize,
+@@ -338,7 +340,7 @@ fn display_size_and_device_ids(
+     }
+ }
+
+-#[cfg(unix)]
++#[cfg(any(unix, windows))]
+ fn digits(num: u64) -> usize {
+     (num.checked_ilog10().unwrap_or(0) + 1) as usize
+ }
+@@ -429,9 +431,9 @@ fn display_items(
+
+         let mut names_vec: Vec<DisplayWithQuote> = Vec::with_capacity(items.len());
+
+-        #[cfg(unix)]
++        #[cfg(any(unix, windows))]
+         let should_display_leading_info = config.inode || config.alloc_size;
+-        #[cfg(not(unix))]
++        #[cfg(not(any(unix, windows)))]
+         let should_display_leading_info = config.alloc_size;
+
+         for i in items {
+@@ -646,14 +648,18 @@ fn display_additional_leading_info(
+     config: &Config,
+     out: &mut impl Write,
+ ) -> UResult<()> {
+-    #[cfg(unix)]
++    #[cfg(any(unix, windows))]
+     {
+         if config.inode {
+             let inode = padding.inode;
+-            if let Some(md) = item.metadata() {
+-                write!(out, "{:>inode$} ", display_inode(md))?;
++            #[cfg(unix)]
++            let inode_value = item.metadata().map(|md| display_inode(md).to_string());
++            #[cfg(windows)]
++            let inode_value = display_inode(item).map(|inode| inode.to_string());
++            if let Some(inode_value) = inode_value {
++                write!(out, "{inode_value:>inode$} ")?;
+             } else {
+                 write!(out, "{:>inode$} ", '?')?;
+             }
+         }
+     }
+@@ -1021,9 +1027,9 @@ fn display_item(
+         state.display_buf.extend(b"  ");
+     }
+
+-    #[cfg(unix)]
++    #[cfg(any(unix, windows))]
+     let should_display_leading_info = config.inode || config.alloc_size;
+-    #[cfg(not(unix))]
++    #[cfg(not(any(unix, windows)))]
+     let should_display_leading_info = config.alloc_size;
+
+     if should_display_leading_info {
+@@ -1387,6 +1393,13 @@ fn display_inode(metadata: &Metadata) -> impl Display {
+     metadata.ino().to_string()
+ }
+
++#[cfg(windows)]
++fn display_inode(item: &PathData) -> Option<u64> {
++    FileInformation::from_path(item.path(), item.must_dereference)
++        .ok()
++        .map(|info| info.file_index())
++}
++
+ #[cfg(unix)]
+ fn calculate_padding_collection(
+     items: &[PathData],
+@@ -1491,6 +1505,8 @@ fn calculate_padding_collection(
+     state: &mut ListState,
+ ) -> PaddingCollection {
+     let mut padding_collections = PaddingCollection {
++        #[cfg(windows)]
++        inode: 1,
+         link_count: 1,
+         uname: 1,
+         group: 1,
+@@ -1501,6 +1517,13 @@ fn calculate_padding_collection(
+     };
+
+     for item in items {
++        #[cfg(windows)]
++        if config.inode {
++            let Some(inode) = display_inode(item) else {
++                continue;
++            };
++            padding_collections.inode = digits(inode).max(padding_collections.inode);
++        }
+         if config.alloc_size
+             && let Some(md) = item.metadata()
+         {
+diff --git a/tests/by-util/test_ls.rs b/tests/by-util/test_ls.rs
+--- a/tests/by-util/test_ls.rs
++++ b/tests/by-util/test_ls.rs
+@@ -3592,6 +3592,33 @@ fn test_ls_inode() {
+     assert_eq!(inode_short, inode_long);
+ }
+
++#[cfg(windows)]
++#[test]
++fn test_ls_inode_uses_windows_file_index() {
++    let scene = TestScenario::new(util_name!());
++    let at = &scene.fixtures;
++
++    at.touch("inode-a");
++    std::fs::hard_link(at.plus("inode-a"), at.plus("inode-b")).unwrap();
++
++    let result = scene
++        .ucmd()
++        .args(&["-i", "inode-a", "inode-b"])
++        .succeeds();
++    let mut lines = result.stdout_str().lines();
++    let inode = |line: &str| {
++        line.split_whitespace()
++            .next()
++            .unwrap()
++            .parse::<u64>()
++            .unwrap()
++    };
++    let inode_a = inode(lines.next().unwrap());
++    let inode_b = inode(lines.next().unwrap());
++    assert_ne!(inode_a, 0);
++    assert_eq!(inode_a, inode_b);
++}
++
+ #[test]
+ #[cfg(not(windows))]
+ fn test_ls_indicator_style() {
