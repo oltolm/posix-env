@@ -21,9 +21,12 @@ source:
     # ln -s ../../ld-new tmpdir/ld/ld linked to nothing: as Cygwin does, a
     # link to program NAME is a link to NAME.exe, named LINK.exe.
     - 0005-ln-link-programs-by-their-.exe-name-on-Windows.patch
+    # pwd, realpath and readlink printed C:\src\...: gcc's $(shell pwd)
+    # went into a Tcl file, where \s and \b are escapes.
+    - 0006-pwd-realpath-readlink-print-paths-with-on-Windows.patch
 
 build:
-  number: 8
+  number: 9
   script:
     interpreter: brush
     file: build.sh
@@ -56,6 +59,8 @@ tests:
         - mktemp -u ./confXXXXXX | findstr /b /c:"./conf" || exit /b 1
         # ln links program NAME as NAME.exe (patch 0005).
         - sh -c "cp \"$(command -v sh)\" prog.exe && mkdir d && ln -s ../prog d/ld && test -L d/ld.exe && d/ld.exe -c true" || exit /b 1
+        # pwd and realpath print / as the shell's pwd does (patch 0006).
+        - sh -c "test \"$(env pwd)\" = \"$(pwd)\" && test \"$(realpath .)\" = \"$(pwd)\"" || exit /b 1
 
 about:
   homepage: https://github.com/uutils/coreutils

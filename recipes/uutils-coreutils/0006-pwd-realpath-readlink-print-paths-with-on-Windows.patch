@@ -1,0 +1,884 @@
+From 90fed73dfd6cf0f5e53f92998a43b2825f5ab94d Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Wed, 7 Oct 2026 00:39:21 +0200
+Subject: [PATCH] pwd, realpath, readlink: print paths with / on Windows
+
+The shell's pwd prints C:/src/build, uutils' pwd printed C:\src\build.
+Scripts read printed paths as POSIX shell or Tcl words, where \s and
+\b are escapes: gcc's Makefile writes $(shell pwd), which make runs
+without a shell, into its testsuite's site.exp, and every c-torture
+"builtins" test linked to "C:srcuild-gccgcc/...".  pwd, realpath and
+readlink now print / separators on Windows (uucore::fs::
+posix_separators); Windows accepts both.  The tests expect / there.
+---
+ src/uu/pwd/Cargo.toml             |   2 +-
+ src/uu/pwd/src/pwd.rs             |   3 +-
+ src/uu/readlink/src/readlink.rs   |   3 +-
+ src/uu/realpath/src/realpath.rs   |   3 +-
+ src/uucore/src/lib/features/fs.rs |  25 ++++++
+ tests/by-util/test_pwd.rs         |  41 ++++++---
+ tests/by-util/test_readlink.rs    |  60 +++++++------
+ tests/by-util/test_realpath.rs    | 143 +++++++++++++++++-------------
+ 8 files changed, 177 insertions(+), 103 deletions(-)
+
+diff --git a/src/uu/pwd/Cargo.toml b/src/uu/pwd/Cargo.toml
+index 549ac63..8d9a4f1 100644
+--- a/src/uu/pwd/Cargo.toml
++++ b/src/uu/pwd/Cargo.toml
+@@ -18,7 +18,7 @@ doctest = false
+ 
+ [dependencies]
+ clap = { workspace = true }
+-uucore = { workspace = true }
++uucore = { workspace = true, features = ["fs"] }
+ fluent = { workspace = true }
+ 
+ [lints]
+diff --git a/src/uu/pwd/src/pwd.rs b/src/uu/pwd/src/pwd.rs
+index 904a986..06f823a 100644
+--- a/src/uu/pwd/src/pwd.rs
++++ b/src/uu/pwd/src/pwd.rs
+@@ -140,7 +140,8 @@ pub fn uumain(args: impl uucore::Args) -> UResult<()> {
+         .map(Into::into)
+         .unwrap_or(cwd);
+ 
+-    println_verbatim(cwd)
++    // Printed with `/` on Windows, as the shell's pwd prints it.
++    println_verbatim(&*uucore::fs::posix_separators(cwd.as_ref()))
+         .map_err_context(|| translate!("pwd-error-failed-to-print-current-directory"))?;
+     Ok(())
+ }
+diff --git a/src/uu/readlink/src/readlink.rs b/src/uu/readlink/src/readlink.rs
+index 692f277..0428a66 100644
+--- a/src/uu/readlink/src/readlink.rs
++++ b/src/uu/readlink/src/readlink.rs
+@@ -182,7 +182,8 @@ pub fn uu_app() -> Command {
+ }
+ 
+ fn show(path: &Path, line_ending: Option<LineEnding>) -> std::io::Result<()> {
+-    uucore::display::print_verbatim(path)?;
++    // Printed with `/` on Windows, as scripts read it.
++    uucore::display::print_verbatim(&*uucore::fs::posix_separators(path))?;
+     if let Some(line_ending) = line_ending {
+         write!(stdout(), "{line_ending}")?;
+     }
+diff --git a/src/uu/realpath/src/realpath.rs b/src/uu/realpath/src/realpath.rs
+index f215124..921fb2e 100644
+--- a/src/uu/realpath/src/realpath.rs
++++ b/src/uu/realpath/src/realpath.rs
+@@ -307,7 +307,8 @@ fn resolve_path(
+ 
+     let abs = process_relative(abs, relative_base, relative_to);
+ 
+-    print_verbatim(abs)?;
++    // Printed with `/` on Windows, as scripts read it.
++    print_verbatim(&*uucore::fs::posix_separators(&abs))?;
+     stdout().write_all(&[line_ending.into()])?;
+     Ok(())
+ }
+diff --git a/src/uucore/src/lib/features/fs.rs b/src/uucore/src/lib/features/fs.rs
+index b5bdd3f..c4ac899 100644
+--- a/src/uucore/src/lib/features/fs.rs
++++ b/src/uucore/src/lib/features/fs.rs
+@@ -250,6 +250,31 @@ pub enum ResolveMode {
+     Logical,
+ }
+ 
++/// A path to print for scripts: on Windows with `/` separators, which
++/// Windows accepts too.  A printed `C:\src\build` breaks the scripts that
++/// read it as POSIX shell or Tcl words (`\s` and `\b` are escapes there);
++/// gcc's Makefile writes `$(shell pwd)` into its testsuite's site.exp.
++pub fn posix_separators(path: &Path) -> std::borrow::Cow<'_, Path> {
++    #[cfg(windows)]
++    {
++        let wide: Vec<u16> = path.as_os_str().encode_wide().collect();
++        if wide.contains(&u16::from(b'\\')) {
++            let wide: Vec<u16> = wide
++                .into_iter()
++                .map(|c| {
++                    if c == u16::from(b'\\') {
++                        u16::from(b'/')
++                    } else {
++                        c
++                    }
++                })
++                .collect();
++            return std::borrow::Cow::Owned(PathBuf::from(OsString::from_wide(&wide)));
++        }
++    }
++    std::borrow::Cow::Borrowed(path)
++}
++
+ /// Normalize a path by removing relative information
+ /// For example, convert 'bar/../foo/bar.txt' => 'foo/bar.txt'
+ /// copied from `<https://github.com/rust-lang/cargo/blob/2e4cfc2b7d43328b207879228a2ca7d427d188bb/src/cargo/util/paths.rs#L65-L90>`
+diff --git a/tests/by-util/test_pwd.rs b/tests/by-util/test_pwd.rs
+index e044817..4391fb3 100644
+--- a/tests/by-util/test_pwd.rs
++++ b/tests/by-util/test_pwd.rs
+@@ -11,6 +11,16 @@ use uutests::at_and_ucmd;
+ use uutests::new_ucmd;
+ use uutests::util::UCommand;
+ 
++/// Paths are printed with `/` on Windows.
++fn printed(s: impl Into<String>) -> String {
++    let s = s.into();
++    if cfg!(windows) {
++        s.replace('\\', "/")
++    } else {
++        s
++    }
++}
++
+ #[test]
+ fn test_invalid_arg() {
+     new_ucmd!().arg("--definitely-invalid").fails_with_code(1);
+@@ -19,7 +29,8 @@ fn test_invalid_arg() {
+ #[test]
+ fn test_default() {
+     let (at, mut ucmd) = at_and_ucmd!();
+-    ucmd.succeeds().stdout_is(at.root_dir_resolved() + "\n");
++    ucmd.succeeds()
++        .stdout_is(printed(at.root_dir_resolved() + "\n"));
+ }
+ 
+ #[test]
+@@ -28,7 +39,7 @@ fn test_ignores_non_option_arguments() {
+     let (at, mut ucmd) = at_and_ucmd!();
+     ucmd.arg("will-fail")
+         .succeeds()
+-        .stdout_is(at.root_dir_resolved() + "\n")
++        .stdout_is(printed(at.root_dir_resolved() + "\n"))
+         .stderr_is("pwd: ignoring non-option arguments\n");
+ }
+ 
+@@ -88,19 +99,25 @@ fn symlinked_env() -> Env {
+ #[test]
+ fn test_symlinked_logical() {
+     let mut env = symlinked_env();
+-    env.ucmd.arg("-L").succeeds().stdout_is(env.symdir + "\n");
++    env.ucmd
++        .arg("-L")
++        .succeeds()
++        .stdout_is(printed(env.symdir + "\n"));
+ }
+ 
+ #[test]
+ fn test_symlinked_physical() {
+     let mut env = symlinked_env();
+-    env.ucmd.arg("-P").succeeds().stdout_is(env.subdir + "\n");
++    env.ucmd
++        .arg("-P")
++        .succeeds()
++        .stdout_is(printed(env.subdir + "\n"));
+ }
+ 
+ #[test]
+ fn test_symlinked_default() {
+     let mut env = symlinked_env();
+-    env.ucmd.succeeds().stdout_is(env.subdir + "\n");
++    env.ucmd.succeeds().stdout_is(printed(env.subdir + "\n"));
+ }
+ 
+ #[test]
+@@ -109,7 +126,7 @@ fn test_symlinked_default_posix() {
+     env.ucmd
+         .env("POSIXLY_CORRECT", "1")
+         .succeeds()
+-        .stdout_is(env.symdir.clone() + "\n");
++        .stdout_is(printed(env.symdir.clone() + "\n"));
+ }
+ 
+ #[test]
+@@ -119,7 +136,7 @@ fn test_symlinked_default_posix_l() {
+         .env("POSIXLY_CORRECT", "1")
+         .arg("-L")
+         .succeeds()
+-        .stdout_is(env.symdir + "\n");
++        .stdout_is(printed(env.symdir + "\n"));
+ }
+ 
+ #[test]
+@@ -129,7 +146,7 @@ fn test_symlinked_default_posix_p() {
+         .env("POSIXLY_CORRECT", "1")
+         .arg("-P")
+         .succeeds()
+-        .stdout_is(env.subdir + "\n");
++        .stdout_is(printed(env.subdir + "\n"));
+ }
+ 
+ #[cfg(not(windows))]
+@@ -144,7 +161,7 @@ pub mod untrustworthy_pwd_var {
+         ucmd.arg("-L")
+             .env("PWD", "/somefakedir")
+             .succeeds()
+-            .stdout_is(at.root_dir_resolved() + "\n");
++            .stdout_is(printed(at.root_dir_resolved() + "\n"));
+     }
+ 
+     #[test]
+@@ -154,7 +171,7 @@ pub mod untrustworthy_pwd_var {
+             .arg("-L")
+             .env("PWD", env.root)
+             .succeeds()
+-            .stdout_is(env.subdir + "\n");
++            .stdout_is(printed(env.subdir + "\n"));
+     }
+ 
+     #[test]
+@@ -164,7 +181,7 @@ pub mod untrustworthy_pwd_var {
+             .arg("-L")
+             .env("PWD", Path::new(&env.symdir).join("."))
+             .succeeds()
+-            .stdout_is(env.subdir + "\n");
++            .stdout_is(printed(env.subdir + "\n"));
+     }
+ 
+     #[test]
+@@ -174,6 +191,6 @@ pub mod untrustworthy_pwd_var {
+             .arg("-L")
+             .env("PWD", ".")
+             .succeeds()
+-            .stdout_is(env.subdir + "\n");
++            .stdout_is(printed(env.subdir + "\n"));
+     }
+ }
+diff --git a/tests/by-util/test_readlink.rs b/tests/by-util/test_readlink.rs
+index ad3576b..313a76f 100644
+--- a/tests/by-util/test_readlink.rs
++++ b/tests/by-util/test_readlink.rs
+@@ -16,6 +16,16 @@ static NOT_A_DIRECTORY: &str = "Not a directory";
+ #[cfg(windows)]
+ static NOT_A_DIRECTORY: &str = "The directory name is invalid.";
+ 
++/// Paths are printed with `/` on Windows.
++fn printed(s: impl Into<String>) -> String {
++    let s = s.into();
++    if cfg!(windows) {
++        s.replace('\\', "/")
++    } else {
++        s
++    }
++}
++
+ #[test]
+ fn test_no_args() {
+     new_ucmd!()
+@@ -36,14 +46,14 @@ fn test_resolve() {
+     at.touch("foo");
+     at.symlink_file("foo", "bar");
+ 
+-    ucmd.arg("bar").succeeds().stdout_contains("foo\n");
++    ucmd.arg("bar").succeeds().stdout_contains(printed("foo\n"));
+ }
+ 
+ #[test]
+ fn test_canonicalize() {
+     let (at, mut ucmd) = at_and_ucmd!();
+     let actual = ucmd.arg("-f").arg(".").succeeds().stdout_move_str();
+-    let expect = at.root_dir_resolved() + "\n";
++    let expect = printed(at.root_dir_resolved() + "\n");
+     println!("actual: {actual:?}");
+     println!("expect: {expect:?}");
+     assert_eq!(actual, expect);
+@@ -53,7 +63,7 @@ fn test_canonicalize() {
+ fn test_canonicalize_existing() {
+     let (at, mut ucmd) = at_and_ucmd!();
+     let actual = ucmd.arg("-e").arg(".").succeeds().stdout_move_str();
+-    let expect = at.root_dir_resolved() + "\n";
++    let expect = printed(at.root_dir_resolved() + "\n");
+     println!("actual: {actual:?}");
+     println!("expect: {expect:?}");
+     assert_eq!(actual, expect);
+@@ -63,7 +73,7 @@ fn test_canonicalize_existing() {
+ fn test_canonicalize_missing() {
+     let (at, mut ucmd) = at_and_ucmd!();
+     let actual = ucmd.arg("-m").arg(GIBBERISH).succeeds().stdout_move_str();
+-    let expect = path_concat!(at.root_dir_resolved(), GIBBERISH) + "\n";
++    let expect = printed(path_concat!(at.root_dir_resolved(), GIBBERISH) + "\n");
+     println!("actual: {actual:?}");
+     println!("expect: {expect:?}");
+     assert_eq!(actual, expect);
+@@ -80,7 +90,7 @@ fn test_canonicalize_symlink_before_parentdir() {
+     at.relative_symlink_dir("real/sub", "link");
+ 
+     let actual = ucmd.args(&["-f", "link/.."]).succeeds().stdout_move_str();
+-    let expect = format!("{}/real\n", at.root_dir_resolved());
++    let expect = printed(format!("{}/real\n", at.root_dir_resolved()));
+     assert_eq!(actual, expect);
+ }
+ 
+@@ -95,7 +105,7 @@ fn test_long_redirection_to_current_dir() {
+         .arg(dir)
+         .succeeds()
+         .stdout_move_str();
+-    let expect = at.root_dir_resolved();
++    let expect = printed(at.root_dir_resolved());
+     println!("actual: {actual:?}");
+     println!("expect: {expect:?}");
+     assert_eq!(actual, expect);
+@@ -111,7 +121,7 @@ fn test_long_redirection_to_root() {
+         .arg(dir)
+         .succeeds()
+         .stdout_move_str();
+-    let expect = get_root_path();
++    let expect = printed(get_root_path());
+     println!("actual: {actual:?}");
+     println!("expect: {expect:?}");
+     assert_eq!(actual, expect);
+@@ -172,7 +182,7 @@ fn test_trailing_slash_regular_file() {
+         .ucmd()
+         .args(&["-e", "./regfile"])
+         .succeeds()
+-        .stdout_contains("regfile");
++        .stdout_contains(printed("regfile"));
+ }
+ 
+ #[test]
+@@ -191,7 +201,7 @@ fn test_trailing_slash_symlink_to_regular_file() {
+         .ucmd()
+         .args(&["-e", "./link"])
+         .succeeds()
+-        .stdout_contains("regfile");
++        .stdout_contains(printed("regfile"));
+     scene
+         .ucmd()
+         .args(&["-e", "./link/more"])
+@@ -209,7 +219,7 @@ fn test_trailing_slash_directory() {
+             .ucmd()
+             .args(&["-e", query])
+             .succeeds()
+-            .stdout_contains("directory");
++            .stdout_contains(printed("directory"));
+     }
+ }
+ 
+@@ -224,7 +234,7 @@ fn test_trailing_slash_symlink_to_directory() {
+             .ucmd()
+             .args(&["-e", query])
+             .succeeds()
+-            .stdout_contains("directory");
++            .stdout_contains(printed("directory"));
+     }
+     scene
+         .ucmd()
+@@ -271,7 +281,7 @@ fn test_canonicalize_trailing_slash_regfile() {
+             .ucmd()
+             .args(&["-f", name])
+             .succeeds()
+-            .stdout_contains("regfile");
++            .stdout_contains(printed("regfile"));
+         scene
+             .ucmd()
+             .args(&["-fv", &format!("./{name}/")])
+@@ -304,22 +314,22 @@ fn test_canonicalize_trailing_slash_subdir() {
+             .ucmd()
+             .args(&["-f", name])
+             .succeeds()
+-            .stdout_contains("subdir");
++            .stdout_contains(printed("subdir"));
+         scene
+             .ucmd()
+             .args(&["-f", &format!("./{name}/")])
+             .succeeds()
+-            .stdout_contains("subdir");
++            .stdout_contains(printed("subdir"));
+         scene
+             .ucmd()
+             .args(&["-f", &format!("{name}/more")])
+             .succeeds()
+-            .stdout_contains(path_concat!("subdir", "more"));
++            .stdout_contains(printed(path_concat!("subdir", "more")));
+         scene
+             .ucmd()
+             .args(&["-f", &format!("./{name}/more/")])
+             .succeeds()
+-            .stdout_contains(path_concat!("subdir", "more"));
++            .stdout_contains(printed(path_concat!("subdir", "more")));
+         scene
+             .ucmd()
+             .args(&["-f", &format!("{name}/more/more2")])
+@@ -343,12 +353,12 @@ fn test_canonicalize_trailing_slash_missing() {
+             .ucmd()
+             .args(&["-f", name])
+             .succeeds()
+-            .stdout_contains("missing");
++            .stdout_contains(printed("missing"));
+         scene
+             .ucmd()
+             .args(&["-f", &format!("./{name}/")])
+             .succeeds()
+-            .stdout_contains("missing");
++            .stdout_contains(printed("missing"));
+         scene
+             .ucmd()
+             .args(&["-f", &format!("{name}/more")])
+@@ -373,7 +383,7 @@ fn test_canonicalize_trailing_slash_subdir_missing() {
+             .ucmd()
+             .args(&["-f", query])
+             .succeeds()
+-            .stdout_contains(path_concat!("subdir", "missing"));
++            .stdout_contains(printed(path_concat!("subdir", "missing")));
+     }
+     for query in ["link4/more", "./link4/more/"] {
+         scene
+@@ -404,29 +414,29 @@ fn test_delimiters() {
+     new_ucmd!()
+         .args(&["--zero", "-n", "-m", "/a"])
+         .succeeds()
+-        .stdout_only("/a");
++        .stdout_only(printed("/a"));
+     new_ucmd!()
+         .args(&["-n", "-m", "/a"])
+         .succeeds()
+-        .stdout_only("/a");
++        .stdout_only(printed("/a"));
+     new_ucmd!()
+         .args(&["--zero", "-m", "/a"])
+         .succeeds()
+-        .stdout_only("/a\0");
++        .stdout_only(printed("/a\0"));
+     new_ucmd!()
+         .args(&["-m", "/a"])
+         .succeeds()
+-        .stdout_only("/a\n");
++        .stdout_only(printed("/a\n"));
+     new_ucmd!()
+         .args(&["--zero", "-n", "-m", "/a", "/a"])
+         .succeeds()
+         .stderr_contains("ignoring --no-newline with multiple arguments")
+-        .stdout_is("/a\0/a\0");
++        .stdout_is(printed("/a\0/a\0"));
+     new_ucmd!()
+         .args(&["-n", "-m", "/a", "/a"])
+         .succeeds()
+         .stderr_contains("ignoring --no-newline with multiple arguments")
+-        .stdout_is("/a\n/a\n");
++        .stdout_is(printed("/a\n/a\n"));
+ }
+ 
+ #[test]
+diff --git a/tests/by-util/test_realpath.rs b/tests/by-util/test_realpath.rs
+index 14b0ee0..478a1fe 100644
+--- a/tests/by-util/test_realpath.rs
++++ b/tests/by-util/test_realpath.rs
+@@ -16,11 +16,21 @@ use std::path::{MAIN_SEPARATOR, Path};
+ 
+ static GIBBERISH: &str = "supercalifragilisticexpialidocious";
+ 
++/// Paths are printed with `/` on Windows.
++fn printed(s: impl Into<String>) -> String {
++    let s = s.into();
++    if cfg!(windows) {
++        s.replace('\\', "/")
++    } else {
++        s
++    }
++}
++
+ #[test]
+ fn test_realpath_current_directory() {
+     let (at, mut ucmd) = at_and_ucmd!();
+-    let expect = at.root_dir_resolved() + "\n";
+-    ucmd.arg(".").succeeds().stdout_is(expect);
++    let expect = printed(at.root_dir_resolved() + "\n");
++    ucmd.arg(".").succeeds().stdout_is(printed(expect));
+ }
+ 
+ #[test]
+@@ -28,16 +38,16 @@ fn test_realpath_long_redirection_to_current_dir() {
+     let (at, mut ucmd) = at_and_ucmd!();
+     // Create a 256-character path to current directory
+     let dir = path_concat!(".", ..128);
+-    let expect = at.root_dir_resolved() + "\n";
+-    ucmd.arg(dir).succeeds().stdout_is(expect);
++    let expect = printed(at.root_dir_resolved() + "\n");
++    ucmd.arg(dir).succeeds().stdout_is(printed(expect));
+ }
+ 
+ #[test]
+ fn test_realpath_long_redirection_to_root() {
+     // Create a 255-character path to root
+     let dir = path_concat!("..", ..85);
+-    let expect = get_root_path().to_owned() + "\n";
+-    new_ucmd!().arg(dir).succeeds().stdout_is(expect);
++    let expect = printed(get_root_path().to_owned() + "\n");
++    new_ucmd!().arg(dir).succeeds().stdout_is(printed(expect));
+ }
+ 
+ #[test]
+@@ -48,8 +58,16 @@ fn test_realpath_file_and_links() {
+     at.touch("foo");
+     at.symlink_file("foo", "bar");
+ 
+-    scene.ucmd().arg("foo").succeeds().stdout_contains("foo\n");
+-    scene.ucmd().arg("bar").succeeds().stdout_contains("foo\n");
++    scene
++        .ucmd()
++        .arg("foo")
++        .succeeds()
++        .stdout_contains(printed("foo\n"));
++    scene
++        .ucmd()
++        .arg("bar")
++        .succeeds()
++        .stdout_contains(printed("foo\n"));
+ }
+ 
+ #[test]
+@@ -65,14 +83,14 @@ fn test_realpath_file_and_links_zero() {
+         .arg("foo")
+         .arg("-z")
+         .succeeds()
+-        .stdout_contains("foo\u{0}");
++        .stdout_contains(printed("foo\u{0}"));
+ 
+     scene
+         .ucmd()
+         .arg("bar")
+         .arg("-z")
+         .succeeds()
+-        .stdout_contains("foo\u{0}");
++        .stdout_contains(printed("foo\u{0}"));
+ }
+ 
+ #[test]
+@@ -90,14 +108,14 @@ fn test_realpath_file_and_links_strip() {
+             .arg("foo")
+             .arg(strip_arg)
+             .succeeds()
+-            .stdout_contains("foo\n");
++            .stdout_contains(printed("foo\n"));
+ 
+         scene
+             .ucmd()
+             .arg("bar")
+             .arg(strip_arg)
+             .succeeds()
+-            .stdout_contains("bar\n");
++            .stdout_contains(printed("bar\n"));
+     }
+ }
+ 
+@@ -117,7 +135,7 @@ fn test_realpath_file_and_links_strip_zero() {
+             .arg(strip_arg)
+             .arg("-z")
+             .succeeds()
+-            .stdout_contains("foo\u{0}");
++            .stdout_contains(printed("foo\u{0}"));
+ 
+         scene
+             .ucmd()
+@@ -125,7 +143,7 @@ fn test_realpath_file_and_links_strip_zero() {
+             .arg(strip_arg)
+             .arg("-z")
+             .succeeds()
+-            .stdout_contains("bar\u{0}");
++            .stdout_contains(printed("bar\u{0}"));
+     }
+ }
+ 
+@@ -142,7 +160,7 @@ fn test_realpath_physical_mode() {
+         .ucmd()
+         .arg("dir1/foo/..")
+         .succeeds()
+-        .stdout_contains("dir2\n");
++        .stdout_contains(printed("dir2\n"));
+ }
+ 
+ #[test]
+@@ -159,7 +177,7 @@ fn test_realpath_logical_mode() {
+         .arg("-L")
+         .arg("dir1/foo/..")
+         .succeeds()
+-        .stdout_contains("dir1\n");
++        .stdout_contains(printed("dir1\n"));
+ }
+ 
+ #[test]
+@@ -192,8 +210,10 @@ fn test_realpath_loop() {
+ fn test_realpath_default_allows_final_non_existent() {
+     let p = Path::new("").join(GIBBERISH);
+     let (at, mut ucmd) = at_and_ucmd!();
+-    let expect = path_concat!(at.root_dir_resolved(), p.to_str().unwrap()) + "\n";
+-    ucmd.arg(p.as_os_str()).succeeds().stdout_only(expect);
++    let expect = printed(path_concat!(at.root_dir_resolved(), p.to_str().unwrap()) + "\n");
++    ucmd.arg(p.as_os_str())
++        .succeeds()
++        .stdout_only(printed(expect));
+ }
+ 
+ #[test]
+@@ -205,10 +225,9 @@ fn test_realpath_default_forbids_non_final_non_existent() {
+ #[test]
+ fn test_realpath_existing() {
+     let (at, mut ucmd) = at_and_ucmd!();
+-    ucmd.arg("-e")
+-        .arg(".")
+-        .succeeds()
+-        .stdout_only(at.plus_as_string(format!("{}\n", at.root_dir_resolved())));
++    ucmd.arg("-e").arg(".").succeeds().stdout_only(printed(
++        at.plus_as_string(format!("{}\n", at.root_dir_resolved())),
++    ));
+ }
+ 
+ #[test]
+@@ -228,11 +247,11 @@ fn test_realpath_existing_error_quiet() {
+ fn test_realpath_missing() {
+     let p = Path::new("").join(GIBBERISH).join(GIBBERISH);
+     let (at, mut ucmd) = at_and_ucmd!();
+-    let expect = path_concat!(at.root_dir_resolved(), p.to_str().unwrap()) + "\n";
++    let expect = printed(path_concat!(at.root_dir_resolved(), p.to_str().unwrap()) + "\n");
+     ucmd.arg("-m")
+         .arg(p.as_os_str())
+         .succeeds()
+-        .stdout_only(expect);
++        .stdout_only(printed(expect));
+ }
+ 
+ #[test]
+@@ -252,8 +271,8 @@ fn test_realpath_when_symlink_is_absolute_and_enoent() {
+         .arg("dir1/foo2")
+         .arg("dir1/foo3")
+         .fails()
+-        .stdout_contains("/dir2/bar\n")
+-        .stdout_contains("/dir2/baz\n")
++        .stdout_contains(printed("/dir2/bar\n"))
++        .stdout_contains(printed("/dir2/baz\n"))
+         .stderr_is("realpath: dir1/foo2: No such file or directory\n");
+ 
+     #[cfg(windows)]
+@@ -261,8 +280,8 @@ fn test_realpath_when_symlink_is_absolute_and_enoent() {
+         .arg("dir1/foo2")
+         .arg("dir1/foo3")
+         .fails()
+-        .stdout_contains("\\dir2\\bar\n")
+-        .stdout_contains("\\dir2\\baz\n")
++        .stdout_contains(printed("\\dir2\\bar\n"))
++        .stdout_contains(printed("\\dir2\\baz\n"))
+         .stderr_is("realpath: dir1/foo2: No such file or directory\n");
+ }
+ 
+@@ -284,8 +303,8 @@ fn test_realpath_when_symlink_part_is_missing() {
+ 
+     ucmd.args(&["dir1/foo1", "dir1/foo2", "dir1/foo3", "dir1/foo4"])
+         .fails()
+-        .stdout_contains(expect1 + "\n")
+-        .stdout_contains(expect2 + "\n")
++        .stdout_contains(printed(expect1 + "\n"))
++        .stdout_contains(printed(expect2 + "\n"))
+         .stderr_contains("realpath: dir1/foo2: No such file or directory\n")
+         .stderr_contains("realpath: dir1/foo4: No such file or directory\n");
+ }
+@@ -307,7 +326,7 @@ fn test_relative_existing_require_directories_2() {
+     at.touch("dir1/f");
+     ucmd.args(&["-e", "--relative-base=.", "--relative-to=dir1", "."])
+         .succeeds()
+-        .stdout_is("..\n");
++        .stdout_is(printed("..\n"));
+ }
+ 
+ #[test]
+@@ -323,10 +342,10 @@ fn test_relative_base_not_prefix_of_relative_to() {
+         .succeeds();
+ 
+     #[cfg(windows)]
+-    result.stdout_matches(&Regex::new(r"^.*:\\usr\n.*:\\usr\\local\n$").unwrap());
++    result.stdout_matches(&Regex::new(r"^.*:/usr\n.*:/usr/local\n$").unwrap());
+ 
+     #[cfg(not(windows))]
+-    result.stdout_is("/usr\n/usr/local\n");
++    result.stdout_is(printed("/usr\n/usr/local\n"));
+ }
+ 
+ #[test]
+@@ -335,22 +354,22 @@ fn test_relative_string_handling() {
+         .args(&["-m", "--relative-to=prefix", "prefixed/1"])
+         .succeeds();
+     #[cfg(not(windows))]
+-    result.stdout_is("../prefixed/1\n");
++    result.stdout_is(printed("../prefixed/1\n"));
+     #[cfg(windows)]
+-    result.stdout_is("..\\prefixed\\1\n");
++    result.stdout_is(printed("..\\prefixed\\1\n"));
+ 
+     let result = new_ucmd!()
+         .args(&["-m", "--relative-to=prefixed", "prefix/1"])
+         .succeeds();
+     #[cfg(not(windows))]
+-    result.stdout_is("../prefix/1\n");
++    result.stdout_is(printed("../prefix/1\n"));
+     #[cfg(windows)]
+-    result.stdout_is("..\\prefix\\1\n");
++    result.stdout_is(printed("..\\prefix\\1\n"));
+ 
+     new_ucmd!()
+         .args(&["-m", "--relative-to=prefixed", "prefixed/1"])
+         .succeeds()
+-        .stdout_is("1\n");
++        .stdout_is(printed("1\n"));
+ }
+ 
+ #[test]
+@@ -365,27 +384,27 @@ fn test_relative() {
+         ])
+         .succeeds();
+     #[cfg(not(windows))]
+-    result.stdout_is("/tmp\n.\n");
++    result.stdout_is(printed("/tmp\n.\n"));
+     #[cfg(windows)]
+-    result.stdout_matches(&Regex::new(r"^.*:\\tmp\n\.\n$").unwrap());
++    result.stdout_matches(&Regex::new(r"^.*:/tmp\n\.\n$").unwrap());
+ 
+     new_ucmd!()
+         .args(&["-sm", "--relative-base=/", "--relative-to=/", "/", "/usr"])
+         .succeeds()
+-        .stdout_is(".\nusr\n");
++        .stdout_is(printed(".\nusr\n"));
+ 
+     let result = new_ucmd!()
+         .args(&["-sm", "--relative-base=/usr", "/tmp", "/usr"])
+         .succeeds();
+     #[cfg(not(windows))]
+-    result.stdout_is("/tmp\n.\n");
++    result.stdout_is(printed("/tmp\n.\n"));
+     #[cfg(windows)]
+-    result.stdout_matches(&Regex::new(r"^.*:\\tmp\n\.\n$").unwrap());
++    result.stdout_matches(&Regex::new(r"^.*:/tmp\n\.\n$").unwrap());
+ 
+     new_ucmd!()
+         .args(&["-sm", "--relative-base=/", "/", "/usr"])
+         .succeeds()
+-        .stdout_is(".\nusr\n");
++        .stdout_is(printed(".\nusr\n"));
+ }
+ 
+ #[test]
+@@ -401,44 +420,44 @@ fn test_realpath_trailing_slash() {
+         .ucmd()
+         .arg("link_file")
+         .succeeds()
+-        .stdout_contains(format!("{MAIN_SEPARATOR}file\n"));
++        .stdout_contains(printed(format!("{MAIN_SEPARATOR}file\n")));
+     scene.ucmd().arg("link_file/").fails_with_code(1);
+     scene
+         .ucmd()
+         .arg("link_dir")
+         .succeeds()
+-        .stdout_contains(format!("{MAIN_SEPARATOR}dir\n"));
++        .stdout_contains(printed(format!("{MAIN_SEPARATOR}dir\n")));
+     scene
+         .ucmd()
+         .arg("link_dir/")
+         .succeeds()
+-        .stdout_contains(format!("{MAIN_SEPARATOR}dir\n"));
++        .stdout_contains(printed(format!("{MAIN_SEPARATOR}dir\n")));
+     scene
+         .ucmd()
+         .arg("link_no_dir")
+         .succeeds()
+-        .stdout_contains(format!("{MAIN_SEPARATOR}no_dir\n"));
++        .stdout_contains(printed(format!("{MAIN_SEPARATOR}no_dir\n")));
+     scene
+         .ucmd()
+         .arg("link_no_dir/")
+         .succeeds()
+-        .stdout_contains(format!("{MAIN_SEPARATOR}no_dir\n"));
++        .stdout_contains(printed(format!("{MAIN_SEPARATOR}no_dir\n")));
+     scene
+         .ucmd()
+         .args(&["-e", "link_file"])
+         .succeeds()
+-        .stdout_contains(format!("{MAIN_SEPARATOR}file\n"));
++        .stdout_contains(printed(format!("{MAIN_SEPARATOR}file\n")));
+     scene.ucmd().args(&["-e", "link_file/"]).fails_with_code(1);
+     scene
+         .ucmd()
+         .args(&["-e", "link_dir"])
+         .succeeds()
+-        .stdout_contains(format!("{MAIN_SEPARATOR}dir\n"));
++        .stdout_contains(printed(format!("{MAIN_SEPARATOR}dir\n")));
+     scene
+         .ucmd()
+         .args(&["-e", "link_dir/"])
+         .succeeds()
+-        .stdout_contains(format!("{MAIN_SEPARATOR}dir\n"));
++        .stdout_contains(printed(format!("{MAIN_SEPARATOR}dir\n")));
+     scene.ucmd().args(&["-e", "link_no_dir"]).fails_with_code(1);
+     scene
+         .ucmd()
+@@ -448,32 +467,32 @@ fn test_realpath_trailing_slash() {
+         .ucmd()
+         .args(&["-m", "link_file"])
+         .succeeds()
+-        .stdout_contains(format!("{MAIN_SEPARATOR}file\n"));
++        .stdout_contains(printed(format!("{MAIN_SEPARATOR}file\n")));
+     scene
+         .ucmd()
+         .args(&["-m", "link_file/"])
+         .succeeds()
+-        .stdout_contains(format!("{MAIN_SEPARATOR}file\n"));
++        .stdout_contains(printed(format!("{MAIN_SEPARATOR}file\n")));
+     scene
+         .ucmd()
+         .args(&["-m", "link_dir"])
+         .succeeds()
+-        .stdout_contains(format!("{MAIN_SEPARATOR}dir\n"));
++        .stdout_contains(printed(format!("{MAIN_SEPARATOR}dir\n")));
+     scene
+         .ucmd()
+         .args(&["-m", "link_dir/"])
+         .succeeds()
+-        .stdout_contains(format!("{MAIN_SEPARATOR}dir\n"));
++        .stdout_contains(printed(format!("{MAIN_SEPARATOR}dir\n")));
+     scene
+         .ucmd()
+         .args(&["-m", "link_no_dir"])
+         .succeeds()
+-        .stdout_contains(format!("{MAIN_SEPARATOR}no_dir\n"));
++        .stdout_contains(printed(format!("{MAIN_SEPARATOR}no_dir\n")));
+     scene
+         .ucmd()
+         .args(&["-m", "link_no_dir/"])
+         .succeeds()
+-        .stdout_contains(format!("{MAIN_SEPARATOR}no_dir\n"));
++        .stdout_contains(printed(format!("{MAIN_SEPARATOR}no_dir\n")));
+ 
+     scene
+         .ucmd()
+@@ -504,12 +523,12 @@ fn test_realpath_trailing_slash_unreadable_directory() {
+         .ucmd()
+         .arg("dir/")
+         .succeeds()
+-        .stdout_contains(format!("{MAIN_SEPARATOR}dir\n"));
++        .stdout_contains(printed(format!("{MAIN_SEPARATOR}dir\n")));
+     scene
+         .ucmd()
+         .args(&["-e", "dir/"])
+         .succeeds()
+-        .stdout_contains(format!("{MAIN_SEPARATOR}dir\n"));
++        .stdout_contains(printed(format!("{MAIN_SEPARATOR}dir\n")));
+ 
+     at.set_mode("dir", 0o700);
+ }
+@@ -585,7 +604,7 @@ fn test_realpath_canonicalize_options() {
+         }
+         ucmd.arg("existing_dir/nonexistent")
+             .succeeds()
+-            .stdout_contains(expected_path);
++            .stdout_contains(printed(expected_path));
+     }
+ }
+ 
+@@ -615,7 +634,7 @@ fn test_realpath_canonicalize_vs_existing() {
+         ucmd.arg("existing_dir/nonexistent");
+ 
+         if should_succeed {
+-            ucmd.succeeds().stdout_contains(expected_path);
++            ucmd.succeeds().stdout_contains(printed(expected_path));
+         } else {
+             ucmd.fails();
+         }
+-- 
+2.56.0.windows.1
+
