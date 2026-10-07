@@ -1,0 +1,89 @@
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Subject: [PATCH] fix(windows): run ENOEXEC files as shell scripts
+
+POSIX shells retry an executable file through the shell when exec returns
+ENOEXEC.  Windows reports the equivalent failure as ERROR_BAD_EXE_FORMAT
+(193), so plain generated scripts without a #! line failed instead (gawk's
+randtest is one example).
+
+On that specific error, start the running brush executable with the script
+path and its original arguments.  The retry goes through the normal external
+command path so it keeps the environment, redirections, file descriptors and
+process-group setup.  Do not retry another bad-format error from brush itself.
+---
+ brush-core/src/commands.rs                      | 39 ++++++++++++++++++++++++++
+ brush-shell/tests/cases/brush/command_path.yaml |  9 ++++++
+ 2 files changed, 48 insertions(+)
+
+diff --git a/brush-core/src/commands.rs b/brush-core/src/commands.rs
+--- a/brush-core/src/commands.rs
++++ b/brush-core/src/commands.rs
+@@ -659,6 +659,24 @@ pub(crate) fn execute_external_command(
+     argv0_override: Option<&str>,
+     args: &[CommandArg],
+ ) -> Result<ExecutionSpawnResult, error::Error> {
++    execute_external_command_impl(
++        context,
++        executable_path,
++        process_group_id,
++        argv0_override,
++        args,
++        true,
++    )
++}
++
++fn execute_external_command_impl<SE: extensions::ShellExtensions>(
++    context: ExecutionContext<'_, SE>,
++    executable_path: &str,
++    process_group_id: Option<i32>,
++    argv0_override: Option<&str>,
++    args: &[CommandArg],
++    retry_as_shell_script: bool,
++) -> Result<ExecutionSpawnResult, error::Error> {
+     // Filter out the args; we only want strings.
+     let cmd_args = args
+         .iter()
+@@ -745,6 +763,27 @@ pub(crate) fn execute_external_command(
+             ))
+         }
+         Err(spawn_err) => {
++            #[cfg(windows)]
++            if retry_as_shell_script && spawn_err.raw_os_error() == Some(193) {
++                // ERROR_BAD_EXE_FORMAT is Windows' equivalent of ENOEXEC.
++                // POSIX requires the shell to interpret the file in this case.
++                // Re-enter through the external-command path to preserve the
++                // environment, redirections, file descriptors and job setup.
++                let shell_path = std::env::current_exe().map_err(|err| {
++                    error::ErrorKind::FailedToExecuteCommand(
++                        context.command_name.clone(),
++                        err,
++                    )
++                })?;
++                let shell_path = shell_path.to_string_lossy();
++                let mut shell_args = Vec::with_capacity(args.len() + 1);
++                shell_args.push(CommandArg::String(executable_path.to_owned()));
++                shell_args.extend_from_slice(args);
++                return execute_external_command_impl(
++                    context, &shell_path, process_group_id, None, &shell_args, false,
++                );
++            }
++
+             if context.shell.options().interactive {
+                 sys::terminal::move_self_to_foreground()?;
+             }
+diff --git a/brush-shell/tests/cases/brush/command_path.yaml b/brush-shell/tests/cases/brush/command_path.yaml
+--- a/brush-shell/tests/cases/brush/command_path.yaml
++++ b/brush-shell/tests/cases/brush/command_path.yaml
+@@ -29,3 +29,12 @@ cases:
+       ./"${b%.exe}" -c 'test -f "$0" && echo file'
+     expected_stdout: |
+       file
++
++  # POSIX shells interpret a file themselves when exec returns ENOEXEC.
++  # Windows reports the equivalent failure as ERROR_BAD_EXE_FORMAT (193).
++  - name: "a file without a shebang runs as a shell script"
++    stdin: |
++      printf 'printf "%s|%s\n" "$0" "$1"\n' > no-shebang
++      ./no-shebang "a b"
++    expected_stdout: |
++      ./no-shebang|a b

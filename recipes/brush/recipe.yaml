@@ -39,12 +39,13 @@ source:
       - 0025-fix-windows-start-a-program-by-its-file-name-extensi.patch
       - 0026-fix-windows-libtool-wrappers-find-themselves-without.patch
       - 0027-fix-windows-libtool-wrappers-follow-symbolic-links-t.patch
+      - 0028-fix-windows-run-ENOEXEC-files-as-shell-scripts.patch
   - url: https://github.com/reubeno/brush/releases/download/brush-shell-v0.4.0/brush-docs.tar.gz
     sha256: 1070fa3a9470927c0c3d9c5417151f1b8f72317b42bed21f33e5fd4f3dad3332
     target_directory: docs
 
 build:
-  number: 7
+  number: 8
   script:
     interpreter: brush
     file: build.sh
@@ -65,6 +66,9 @@ tests:
         - sh -c "(case x in x) echo ok;; esac)" | findstr /b ok || exit /b 1
         # A case pattern's ")" in a command substitution (patch 0024).
         - sh -c "echo $(case x in x) echo ok;; esac)" | findstr /b ok || exit /b 1
+        # A file without #! is interpreted by brush after ERROR_BAD_EXE_FORMAT (patch 0028).
+        - 'echo echo fallback-ok> no-shebang'
+        - sh -c "./no-shebang" | findstr /x fallback-ok || exit /b 1
 
 about:
   homepage: https://github.com/reubeno/brush
