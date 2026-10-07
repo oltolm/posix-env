@@ -14,7 +14,7 @@ source:
   - path: binmode.c
 
 build:
-  number: 18
+  number: 19
   script:
     interpreter: brush
     content:
@@ -59,6 +59,9 @@ tests:
         - which sh
         # posix-env forwards to the launcher, which only posix-shell.cmd sets.
         - sh -c "POSIX_ENV_LAUNCHER= posix-env list 2>&1 | grep -q posix-shell.cmd" || exit /b 1
+        # libtool accepts x86-64 import libraries also in configures that run
+        # without config.site (gcc's target libraries).
+        - sh -c "case \"$lt_cv_deplibs_check_method\" in *pei?-x86-64*) ;; *) exit 1;; esac" || exit /b 1
         # PATH has none of conda's Windows layout (Library/*, Scripts).
         - sh -c "case \";$PATH;\" in *\"$POSIX_ENV_PREFIX/Library/\"*|*\"$POSIX_ENV_PREFIX/Scripts;\"*) exit 1;; esac" || exit /b 1
         - sh -c "echo a b | awk '{ print $2 }' | grep -q b" || exit /b 1

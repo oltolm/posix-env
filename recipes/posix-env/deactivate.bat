@@ -10,6 +10,8 @@
 @set "FGREP="
 @set "SED="
 @set "PERL5SHELL="
+@set "lt_cv_deplibs_check_method="
+@set "lt_cv_file_magic_cmd="
 @if defined POSIX_ENV_SET_LANG set "LANG="
 @set "POSIX_ENV_SET_LANG="
 @if defined POSIX_ENV_SAVED_CP chcp %POSIX_ENV_SAVED_CP% >nul 2>&1

@@ -24,11 +24,8 @@ test -n "$build_alias" || build_alias=$(uname -m)-w64-mingw32
 # names this shell need it rewritten to #!/bin/sh (scriptexe finds sh).
 : ${ac_cv_path_shell=$CONFIG_SHELL}
 
-# Without a file command, libtool 2.2.x falls back to an i386-only pattern and
-# builds no DLL that depends on an x86-64 import library.  Both are computed
-# in one cached check, so both must be set.
-: ${lt_cv_deplibs_check_method='file_magic file format (pei*-i386(.*architecture: i386)?|pe-arm-wince|pei?-x86-64)'}
-: ${lt_cv_file_magic_cmd='$OBJDUMP -f'}
+# libtool's lt_cv_deplibs_check_method and lt_cv_file_magic_cmd come from the
+# activation script: configures that run without config.site need them too.
 
 # Each addition below is made once: nested configures (binutils, gcc,
 # gettext) inherit LDFLAGS and CPPFLAGS from their parent and read this file

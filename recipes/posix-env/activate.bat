@@ -35,6 +35,13 @@
 @set "SED=%POSIX_ENV_PREFIX%/bin/sed.exe"
 @rem Win32 perl hands commands to its shell the way cmd.exe expects them.
 @set "PERL5SHELL=%POSIX_ENV_PREFIX%/bin/perlsh.exe"
+@rem Without a file command, libtool 2.2.x falls back to an i386-only pattern
+@rem and builds no DLL that depends on an x86-64 import library (gcc's
+@rem libstdc++ came out static only).  Both are computed in one cached check,
+@rem so both must be set.  In the environment: gcc configures its target
+@rem libraries without config.site.
+@set "lt_cv_deplibs_check_method=file_magic file format (pei*-i386(.*architecture: i386)?|pe-arm-wince|pei?-x86-64)"
+@set "lt_cv_file_magic_cmd=$OBJDUMP -f"
 
 @rem Programs follow LC_ALL, LC_* and LANG as on POSIX systems (config.site
 @rem links posix-env's setlocale); without any, C conventions with UTF-8.
