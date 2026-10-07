@@ -19,7 +19,7 @@ source:
     - 0005-autopoint-bsdtar.patch
 
 build:
-  number: 6
+  number: 7
   script:
     interpreter: brush
     file: build.sh

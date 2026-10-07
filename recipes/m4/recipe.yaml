@@ -15,7 +15,7 @@ source:
     - 0002-binary-output.patch
 
 build:
-  number: 9
+  number: 10
   script:
     interpreter: brush
     content:

@@ -10,7 +10,7 @@ source:
   sha256: 7c8b7f9fc8609141fdea9cece85249d308624391ff61dedaf528fcb337727dfd
 
 build:
-  number: 0
+  number: 1
   script:
     interpreter: brush
     content:

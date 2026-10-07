@@ -8,9 +8,13 @@ package:
 source:
   url: https://github.com/tukaani-project/xz/releases/download/v${{ version }}/xz-${{ version }}.tar.xz
   sha256: 4ce24038fd4221e0d13bc1a2de7a4db56e90b92b3bf75321f6c14be73f65de4b
+  patches:
+    # posix-env exports GREP for configure.  Keep the egrep and fgrep
+    # invocation modes from losing their required -E and -F options.
+    - 0001-xzgrep-use-egrep-fgrep-environment.patch
 
 build:
-  number: 6
+  number: 7
   script:
     interpreter: brush
     file: build.sh

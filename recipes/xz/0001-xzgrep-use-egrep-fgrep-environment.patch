@@ -1,0 +1,11 @@
+--- a/src/scripts/xzgrep.in
++++ b/src/scripts/xzgrep.in
+@@ -43,6 +43,6 @@ unset GZIP BZIP BZIP2 LZOP
+
+ case ${0##*/} in
+-  *egrep*) prog=xzegrep; grep=${GREP:-grep -E};;
+-  *fgrep*) prog=xzfgrep; grep=${GREP:-grep -F};;
++  *egrep*) prog=xzegrep; grep=${EGREP:-${GREP:-grep} -E};;
++  *fgrep*) prog=xzfgrep; grep=${FGREP:-${GREP:-grep} -F};;
+   *)       prog=xzgrep; grep=${GREP:-grep};;
+ esac
