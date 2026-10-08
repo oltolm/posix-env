@@ -52,7 +52,7 @@ for %%i in ("%CHANNEL%") do set "CHANNEL=file:///%%~fi"
 set "CHANNEL=%CHANNEL:\=/%"
 set "MAMBA=%TOOLS%micromamba.exe"
 set PACKAGES=posix-env autoconf automake libtool gettext-tools pkgconf ^
-  diffutils patch gzip libarchive xz zstd
+  diffutils patch file gzip libarchive xz zstd
 
 if not exist "%POSIX_ENV_HOME%\conda-meta" (
   echo Creating the environment in %POSIX_ENV_HOME% ...

@@ -30,8 +30,8 @@ dejagnu`). Double-clicked, the launcher opens the shell.
 
 On first use it creates the environment in `%USERPROFILE%\posix-env` (per
 user only) from the local channel, with posix-env, autoconf, automake,
-libtool, gettext-tools, pkgconf, diffutils, patch, gzip, libarchive, xz and
-zstd, and `run` adds a Start menu entry and a Windows Terminal profile, both
+libtool, gettext-tools, pkgconf, diffutils, patch, file, gzip, libarchive, xz
+and zstd, and `run` adds a Start menu entry and a Windows Terminal profile, both
 named "POSIX Shell" and both running `posix-shell run`
 (`tools\posix-shell-entries.ps1 -Remove` deletes them).
 
@@ -181,6 +181,7 @@ them: Rust's standard library uses the wide Windows APIs and binary I/O.
 | pkgconf | `pkg-config`, `pkgconf` |
 | diffutils | `cmp`, `diff`, `diff3`, `sdiff` |
 | patch | `patch` |
+| file | `file` and libmagic |
 | libiconv | `iconv` |
 | gperf | `gperf` |
 | gzip | `gzip`, `gunzip`, `zcat`, `uncompress`, `zgrep`, … |

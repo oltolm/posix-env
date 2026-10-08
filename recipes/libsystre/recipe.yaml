@@ -1,0 +1,58 @@
+# MSYS2's small compatibility wrapper around TRE, built directly to avoid a
+# Meson/Python dependency in the native environment.
+context:
+  version: "1.0.2"
+
+package:
+  name: libsystre
+  version: ${{ version }}
+
+source:
+  - path: systre.c
+  - path: regex.h
+
+build:
+  number: 0
+  script:
+    interpreter: brush
+    content:
+      - mkdir -p "$PREFIX/bin" "$PREFIX/include" "$PREFIX/lib"
+      - >-
+        gcc -O2 -static-libgcc -shared -o "$PREFIX/bin/libsystre-0.dll"
+        -Wl,--out-implib,"$PREFIX/lib/libsystre.dll.a"
+        -I"$PREFIX/include" -L"$PREFIX/lib" systre.c -ltre
+      - cp regex.h "$PREFIX/include/regex.h"
+      - cp "$PREFIX/lib/libsystre.dll.a" "$PREFIX/lib/libregex.dll.a"
+      - cp "$PREFIX/lib/libsystre.dll.a" "$PREFIX/lib/libgnurx.dll.a"
+
+requirements:
+  run_exports:
+    - ${{ pin_subpackage('libsystre', upper_bound='x') }}
+  build:
+    - posix-env
+  host:
+    - libtre
+  run:
+    - libtre
+
+tests:
+  - script:
+      interpreter: cmd
+      content:
+        - 'echo #include ^<regex.h^>> t.c'
+        - echo int main(void) { regex_t r; return regcomp(^&r, "x", 0); }>> t.c
+        - gcc t.c -lregex -o t.exe || exit /b 1
+        - t.exe || exit /b 1
+  - package_contents:
+      files:
+        - bin/libsystre-0.dll
+        - lib/libsystre.dll.a
+        - lib/libregex.dll.a
+        - lib/libgnurx.dll.a
+        - include/regex.h
+
+about:
+  homepage: https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-libsystre
+  license: BSD-2-Clause
+  license_file: COPYING
+  summary: POSIX regular expression API wrapper around TRE

@@ -1,0 +1,16 @@
+MinGW-w64 provides struct timespec with a 64-bit time_t.  Aliasing it to
+Winsock's timeval changes tv_sec to long, then cdf_ctime reads that field
+through a time_t pointer.  Apart from the compiler diagnostic, that reads
+past the field on 64-bit Windows.
+
+--- a/src/cdf.h
++++ b/src/cdf.h
+@@ -35,7 +35,7 @@
+ #ifndef _H_CDF_
+ #define _H_CDF_
+ 
+-#ifdef WIN32
++#if defined(WIN32) && !defined(__MINGW32__)
+ #include <winsock2.h>
+ #define timespec timeval
+ #define tv_nsec tv_usec

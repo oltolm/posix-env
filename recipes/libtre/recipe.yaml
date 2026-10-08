@@ -1,0 +1,59 @@
+context:
+  version: "0.9.0"
+
+package:
+  name: libtre
+  version: ${{ version }}
+
+source:
+  url: https://github.com/laurikari/tre/archive/refs/tags/v${{ version }}.tar.gz
+  sha256: 5b7e5a730f041c6b0dab8f66576cda917577ec06bb393f156b169c51bca170d1
+  patches:
+    # From MSYS2's mingw-w64-libtre.
+    - 0001-enable-wide-characters-on-MinGW.patch
+    - 0002-use-intptr_t-for-pointer-alignment.patch
+    # Automake/libtool already supplies global LDFLAGS to library links.
+    - 0003-do-not-pass-LDFLAGS-twice.patch
+
+build:
+  number: 0
+  script:
+    interpreter: brush
+    content:
+      - mv ChangeLog.old ChangeLog
+      - autoreconf -fiv
+      - >-
+        ./configure --prefix="$PREFIX" --enable-shared --disable-static
+        --disable-nls CC="gcc -static-libgcc"
+        lt_cv_deplibs_check_method=pass_all
+      - make -j"$(nproc)"
+      - make install
+
+requirements:
+  run_exports:
+    - ${{ pin_subpackage('libtre', upper_bound='x') }}
+  build:
+    - posix-env
+    - autoconf
+    - automake
+    - libtool
+    - gettext-tools
+
+tests:
+  - script:
+      interpreter: cmd
+      content:
+        - agrep --version
+  - package_contents:
+      files:
+        - bin/libtre-5.dll
+        - lib/libtre.dll.a
+        - lib/pkgconfig/tre.pc
+        - include/tre/regex.h
+        - include/tre/tre.h
+
+about:
+  homepage: https://github.com/laurikari/tre
+  license: BSD-2-Clause
+  license_file: LICENSE
+  summary: TRE approximate regular expression matching library

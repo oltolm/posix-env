@@ -1,0 +1,73 @@
+context:
+  version: "5.48"
+
+package:
+  name: file
+  version: ${{ version }}
+
+source:
+  url: https://astron.com/pub/file/file-${{ version }}.tar.gz
+  sha256: ed14656883b23a364b4057c05595d93252da9bc473d30106519519d0da141283
+  patches:
+    - 0001-use-native-timespec-on-mingw.patch
+
+build:
+  number: 0
+  script:
+    interpreter: brush
+    content:
+      # MinGW file requires the POSIX API as -lgnurx. Compression support is
+      # disabled upstream on Windows because its decompressor path uses fork.
+      - >-
+        ./configure --prefix="$PREFIX" --enable-shared --disable-static
+        --disable-libseccomp CC="gcc -static-libgcc"
+        CPPFLAGS="-I$PREFIX/include" LDFLAGS="-L$PREFIX/lib"
+        lt_cv_deplibs_check_method=pass_all
+      - make -j"$(nproc)"
+      - make install
+
+requirements:
+  run_exports:
+    - ${{ pin_subpackage('file', upper_bound='x') }}
+  build:
+    - posix-env
+  host:
+    - libsystre
+  run:
+    - libsystre
+
+tests:
+  - requirements:
+      run:
+        - posix-env
+        - autoconf
+        - automake
+        - libtool
+    script:
+      interpreter: cmd
+      content:
+        - file --version | findstr /c:"file-5.48" || exit /b 1
+        - file "%PREFIX%\bin\file.exe" | findstr /i /c:"PE32+" || exit /b 1
+        - echo hello> text.txt
+        - file text.txt | findstr /i /c:"ASCII text" || exit /b 1
+        # With file available, native MinGW libtool selects func_win32_libid.
+        - echo AC_INIT([t], [1])> configure.ac
+        - echo AC_PROG_CC>> configure.ac
+        - echo LT_INIT([win32-dll])>> configure.ac
+        - echo AC_OUTPUT>> configure.ac
+        - sh -c "unset lt_cv_deplibs_check_method lt_cv_file_magic_cmd; CONFIG_SITE=no-such-file autoreconf -fi && CONFIG_SITE=no-such-file ./configure --build=x86_64-w64-mingw32" || exit /b 1
+        - findstr /c:"lt_cv_file_magic_cmd=func_win32_libid" config.log || exit /b 1
+  - package_contents:
+      files:
+        - bin/file.exe
+        - bin/libmagic-1.dll
+        - lib/libmagic.dll.a
+        - lib/pkgconfig/libmagic.pc
+        - include/magic.h
+        - share/misc/magic.mgc
+
+about:
+  homepage: https://www.darwinsys.com/file/
+  license: BSD-2-Clause
+  license_file: COPYING
+  summary: Determine file type from file contents
