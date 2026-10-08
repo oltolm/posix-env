@@ -40,12 +40,13 @@ source:
       - 0026-fix-windows-libtool-wrappers-find-themselves-without.patch
       - 0027-fix-windows-libtool-wrappers-follow-symbolic-links-t.patch
       - 0028-fix-windows-run-ENOEXEC-files-as-shell-scripts.patch
+      - 0029-feat-windows-resolve-POSIX-bin-paths-through-PATH.patch
   - url: https://github.com/reubeno/brush/releases/download/brush-shell-v0.4.0/brush-docs.tar.gz
     sha256: 1070fa3a9470927c0c3d9c5417151f1b8f72317b42bed21f33e5fd4f3dad3332
     target_directory: docs
 
 build:
-  number: 8
+  number: 9
   script:
     interpreter: brush
     file: build.sh
@@ -69,6 +70,8 @@ tests:
         # A file without #! is interpreted by brush after ERROR_BAD_EXE_FORMAT (patch 0028).
         - 'echo echo fallback-ok> no-shebang'
         - sh -c "./no-shebang" | findstr /x fallback-ok || exit /b 1
+        - sh -c "exec /bin/sh -c 'exit 0'" || exit /b 1
+        - sh -c "exec /usr/bin/sh -c 'exit 0'" || exit /b 1
 
 about:
   homepage: https://github.com/reubeno/brush

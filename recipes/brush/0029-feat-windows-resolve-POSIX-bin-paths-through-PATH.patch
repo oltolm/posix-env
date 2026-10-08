@@ -1,0 +1,102 @@
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Subject: [PATCH] feat(windows): resolve POSIX bin paths through PATH
+
+Native Windows has no /bin or /usr/bin, but POSIX build scripts commonly
+execute commands through paths such as /bin/sh and /usr/bin/env.  Brush
+already maps those paths to commands in PATH when reading a shebang; apply
+the same rule when executing a command directly.
+
+Only direct children of /bin and /usr/bin are mapped, so other absolute and
+nested paths retain their normal meaning.  Keep the original command name
+for argv[0] and diagnostics while using the mapped name only for PATH lookup.
+---
+ brush-core/src/commands.rs                      | 13 +++++++++----
+ brush-core/src/sys/windows/fs.rs                | 25 +++++++++++++++++++++++++
+ brush-shell/tests/cases/brush/command_path.yaml |  9 +++++++++
+ 3 files changed, 43 insertions(+), 4 deletions(-)
+
+diff --git a/brush-core/src/commands.rs b/brush-core/src/commands.rs
+--- a/brush-core/src/commands.rs
++++ b/brush-core/src/commands.rs
+@@ -455,14 +455,19 @@ impl<'a, SE: extensions::ShellExtensions> SimpleCommand<'a, SE> {
+         }
+ 
+         // We still haven't found a command to invoke. We'll need to look for an external command.
+-        if !sys::fs::contains_path_separator(&self.command_name) {
++        #[cfg(windows)]
++        let path_search_name = sys::fs::virtual_posix_bin_command_name(&self.command_name);
++        #[cfg(not(windows))]
++        let path_search_name: Option<&str> = None;
++
++        if !sys::fs::contains_path_separator(&self.command_name) || path_search_name.is_some() {
++            let command_name = path_search_name.unwrap_or(&self.command_name);
+             // All else failed; if we were given path directories to search, look through them
+             // for a match. Otherwise, use our default search logic.
+             let path = if let Some(path_dirs) = &self.path_dirs {
+-                pathsearch::resolve_command(path_dirs, self.command_name.as_str())
++                pathsearch::resolve_command(path_dirs, command_name)
+             } else {
+-                self.shell
+-                    .resolve_command_in_path_using_cache(&self.command_name)
++                self.shell.resolve_command_in_path_using_cache(command_name)
+             };
+ 
+             if let Some(path) = path {
+diff --git a/brush-core/src/sys/windows/fs.rs b/brush-core/src/sys/windows/fs.rs
+--- a/brush-core/src/sys/windows/fs.rs
++++ b/brush-core/src/sys/windows/fs.rs
+@@ -278,6 +278,18 @@ pub fn contains_path_separator(s: &str) -> bool {
+     s.contains(PATH_SEPARATORS)
+ }
+ 
++/// Returns the command name represented by a virtual POSIX bin path.
++///
++/// Native Windows has no `/bin` or `/usr/bin`. In the posix-env model these
++/// paths name commands in `PATH`, matching the handling of interpreters in
++/// [`script_interpreter`]. Only a single file-name component is accepted.
++pub fn virtual_posix_bin_command_name(command_name: &str) -> Option<&str> {
++    let name = command_name
++        .strip_prefix("/bin/")
++        .or_else(|| command_name.strip_prefix("/usr/bin/"))?;
++    (!name.is_empty() && !contains_path_separator(name)).then_some(name)
++}
++
+ /// Returns true if the string ends with a path separator character.
+ ///
+ /// On Windows, both `/` and `\` are considered path separators.
+@@ -400,6 +412,19 @@ mod tests {
+         assert_eq!(rfind_path_separator("abc"), None);
+     }
+ 
++    #[test]
++    fn virtual_posix_bin_paths_name_commands_in_path() {
++        assert_eq!(virtual_posix_bin_command_name("/bin/sh"), Some("sh"));
++        assert_eq!(virtual_posix_bin_command_name("/usr/bin/env"), Some("env"));
++        assert_eq!(virtual_posix_bin_command_name("/bin/"), None);
++        assert_eq!(virtual_posix_bin_command_name("/bin/subdir/tool"), None);
++        assert_eq!(
++            virtual_posix_bin_command_name(r"/usr/bin/subdir\tool"),
++            None
++        );
++        assert_eq!(virtual_posix_bin_command_name("/sbin/tool"), None);
++    }
++
+     #[test]
+     fn split_path_for_pattern_both_slashes() {
+         let parts: Vec<_> = split_path_for_pattern("a/b/c").collect();
+diff --git a/brush-shell/tests/cases/brush/command_path.yaml b/brush-shell/tests/cases/brush/command_path.yaml
+--- a/brush-shell/tests/cases/brush/command_path.yaml
++++ b/brush-shell/tests/cases/brush/command_path.yaml
+@@ -38,3 +38,12 @@ cases:
+       ./no-shebang "a b"
+     expected_stdout: |
+       ./no-shebang|a b
++
++  # Native Windows has no /bin or /usr/bin. Treat their direct children as
++  # commands in PATH, as the shebang interpreter handling already does.
++  - name: "POSIX bin paths name commands in PATH"
++    stdin: |
++      PATH="${BASH%[/\\]*}"
++      exec /bin/brush -c '/usr/bin/brush -c "echo mapped"'
++    expected_stdout: |
++      mapped
