@@ -35,7 +35,7 @@ if "%VERB%"=="-h" goto help
 if "%VERB%"=="--help" goto help
 if "%VERB%"=="/?" goto help
 set "KNOWN="
-for %%v in (run install remove list update) do if /i "%VERB%"=="%%v" set "KNOWN=1"
+for %%v in (run install remove list update setup) do if /i "%VERB%"=="%%v" set "KNOWN=1"
 if not defined KNOWN (
   1>&2 echo posix-env: unknown command "%VERB%"
   1>&2 echo Run "posix-env help" for the commands.
@@ -57,7 +57,7 @@ if /i "%VERB%"=="list" (
   "%MAMBA%" list -p "%POSIX_ENV_HOME%"
   exit /b
 )
-if /i not "%VERB%"=="update" if not defined ARGS (1>&2 echo usage: posix-env %VERB% NAME...& exit /b 2)
+if /i not "%VERB%"=="update" if /i not "%VERB%"=="setup" if not defined ARGS (1>&2 echo usage: posix-env %VERB% NAME...& exit /b 2)
 
 rem The channel the environment was created from: "  - URL" in .condarc.
 set "CHANNEL="
@@ -75,9 +75,20 @@ rem Each block ends in "exit /b !STATUS!" on a line of its own: joined to
 rem another command (&, ||, a one-line if), or as a bare "exit /b", it
 rem leaves the exit code of cmd /c at 0.  Delayed expansion only now: the
 rem arguments may hold "!".
+rem setup is the only command that adds the default packages or changes the
+rem user's settings (Start menu, Windows Terminal, PATH): the installer runs
+rem it, and the user runs it again to restore them.
+if /i "%VERB%"=="setup" (
+  echo Setting up the environment in %POSIX_ENV_HOME% ...
+  "%COPY%" install -y -q -p "%POSIX_ENV_HOME%" -c "%CHANNEL%" --override-channels %PACKAGES% && "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "%POSIX_ENV_HOME%\share\posix-env\posix-env-entries.ps1"
+  call set "STATUS=%%ERRORLEVEL%%"
+  del "%COPY%"
+  setlocal EnableDelayedExpansion
+  exit /b !STATUS!
+)
 if /i "%VERB%"=="update" (
   echo Updating the environment in %POSIX_ENV_HOME% ...
-  "%COPY%" install -y -q -p "%POSIX_ENV_HOME%" -c "%CHANNEL%" --override-channels %PACKAGES% && "%COPY%" update --all -y -q -p "%POSIX_ENV_HOME%" -c "%CHANNEL%" --override-channels && echo Restart open POSIX shells to use the updated packages.
+  "%COPY%" update --all -y -q -p "%POSIX_ENV_HOME%" -c "%CHANNEL%" --override-channels && echo Restart open POSIX shells to use the updated packages.
   call set "STATUS=%%ERRORLEVEL%%"
   del "%COPY%"
   setlocal EnableDelayedExpansion
@@ -106,7 +117,9 @@ echo   run COMMAND...    run a command in it (posix-env run make -j8)
 echo   install NAME...   add packages (posix-env install dejagnu)
 echo   remove NAME...    remove packages
 echo   list              list the installed packages
-echo   update            update all packages and add missing default ones
+echo   update            update all packages
+echo   setup             add the default packages, the Start menu entry, the
+echo                     Windows Terminal profile and posix-env on PATH
 echo   help              show this help
 echo.
 echo The environment is %POSIX_ENV_HOME%.
@@ -114,9 +127,8 @@ echo In the shell, "posix-env COMMAND" does the same.
 exit /b 0
 
 :run
-rem The user's settings (Start menu, Windows Terminal, PATH) are set up once
-rem with the environment, by share\posix-env\posix-env-entries.ps1; run
-rem leaves them alone.
+rem The user's settings (Start menu, Windows Terminal, PATH) are setup's;
+rem run leaves them alone.
 
 if not defined POSIX_ENV_TOOLCHAIN set "POSIX_ENV_TOOLCHAIN=C:\msys64\ucrt64\bin"
 if not exist "%POSIX_ENV_TOOLCHAIN%\gcc.exe" echo Warning: no gcc in %POSIX_ENV_TOOLCHAIN% (set POSIX_ENV_TOOLCHAIN).

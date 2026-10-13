@@ -24,36 +24,39 @@ package; it takes a command:
 | `posix-env install NAME...` | adds packages (`posix-env install dejagnu`) |
 | `posix-env remove NAME...` | removes packages |
 | `posix-env list` | lists the installed packages |
-| `posix-env update` | updates all packages and adds missing default ones |
+| `posix-env update` | updates all packages |
+| `posix-env setup` | adds the default packages and the user's settings (below) |
 | `posix-env help` | lists the commands (also without a command) |
 
 The same command works in the POSIX shell, where `bin/posix-env`, a small
-sh script, hands it to the launcher. Double-clicked, the launcher opens the shell. Packages come from
-the channel named in the environment's `.condarc`, and the package commands
-use the environment's own micromamba (the micromamba package, the upstream
-release binary), so an installed environment needs no source checkout.
-`posix-env update` can replace the launcher and micromamba while they run:
-micromamba runs from a temporary copy, and cmd reads each command block
-whole before it runs it.
+sh script, hands it to the launcher. Double-clicked, the launcher opens the
+shell. Packages come from the channel named in the environment's `.condarc`,
+and the package commands use the environment's own micromamba (the
+micromamba package, the upstream release binary), so an installed
+environment needs no source checkout. `posix-env update` can replace the
+launcher and micromamba while they run: micromamba runs from a temporary
+copy, and cmd reads each command block whole before it runs it.
 
-`tools\posix-env.cmd` in a checkout sets the environment up from the
-checkout's channel (`output\`) and then hands every command to the installed
-launcher. On first use it creates `%USERPROFILE%\posix-env` (per user only,
-`POSIX_ENV_HOME` names another place) with posix-env, autoconf, automake,
-libtool, gettext-tools, pkgconf, diffutils, patch, file, gzip, libarchive, xz
-and zstd, and records the channel in `.condarc`. An environment from before
-the launcher was packaged gets posix-env updated. A new environment gets a
-Start menu entry and a Windows Terminal profile, both named "POSIX Shell"
-and both running the installed `posix-env run`, and its top directory on
+`posix-env setup` is the only command that adds the default packages
+(posix-env, autoconf, automake, libtool, gettext-tools, pkgconf, diffutils,
+patch, file, gzip, libarchive, xz and zstd) or changes the user's settings:
+a Start menu entry and a Windows Terminal profile, both named "POSIX Shell"
+and both running `posix-env run`, and the environment's top directory on
 the user's `PATH`, so `posix-env` works in any new cmd window. That
 directory holds no program but `posix-env.cmd`: the tools in `bin` stay off
-the Windows `PATH`. These settings are made only then; `run` only starts
-the shell. `share\posix-env\posix-env-entries.ps1` in the environment sets
-them up again, and with `-Remove` undoes all three.
+the Windows `PATH`. The installer runs `setup`; running it again restores
+whatever is missing. `share\posix-env\posix-env-entries.ps1 -Remove` in the
+environment removes the three settings.
+
+`tools\posix-env.cmd` in a checkout is the installer for the checkout's
+channel (`output\`): `tools\posix-env setup` creates `%USERPROFILE%\posix-env`
+if there is none (per user only, `POSIX_ENV_HOME` names another place),
+records the channel in `.condarc` and runs the installed `posix-env setup`.
+Every other command goes to the installed launcher.
 
 | Variable | Meaning | Default |
 |---|---|---|
-| `POSIX_ENV_HOME` | the environment `tools\posix-env.cmd` sets up | `%USERPROFILE%\posix-env` |
+| `POSIX_ENV_HOME` | the environment `tools\posix-env.cmd` works on | `%USERPROFILE%\posix-env` |
 | `POSIX_ENV_TOOLCHAIN` | the compiler's `bin` directory, put on `PATH` | `C:\msys64\ucrt64\bin` |
 | `POSIX_ENV_GIT` | a directory with `git.exe`, put on `PATH` if it has one | `%ProgramFiles%\Git\cmd` |
 | `POSIX_ENV_EXTRA_PATH` | more directories for `PATH` | none |

@@ -2,9 +2,9 @@
 # menu shortcut and a Windows Terminal profile, both "POSIX Shell" running
 # "posix-env.cmd run", and the environment's top directory on the user's
 # PATH, so "posix-env" works in cmd.  That directory holds no program but
-# posix-env.cmd; the tools in bin stay off the Windows PATH.  Setting up an
-# environment runs this once; nothing else changes these settings, so run
-# it again to restore them.  Existing entries are rewritten.  -Remove
+# posix-env.cmd; the tools in bin stay off the Windows PATH.  posix-env
+# setup runs this; nothing else changes these settings, and setup again
+# restores them.  Existing entries are rewritten.  -Remove
 # undoes all three.  Installed as
 # <prefix>\share\posix-env\posix-env-entries.ps1.
 #   powershell -NoProfile -ExecutionPolicy Bypass -File posix-env-entries.ps1 [-Remove]
