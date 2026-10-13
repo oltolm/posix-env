@@ -67,7 +67,7 @@ if not defined CHANNEL (
   exit /b 1
 )
 set PACKAGES=posix-env autoconf automake libtool gettext-tools pkgconf ^
-  diffutils patch file gzip libarchive xz zstd
+  diffutils patch file gzip libarchive xz zstd less
 set "COPY=%TEMP%\posix-env-micromamba-%RANDOM%.exe"
 copy /y "%MAMBA%" "%COPY%" >nul || exit /b 1
 

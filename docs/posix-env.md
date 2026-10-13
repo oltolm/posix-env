@@ -39,7 +39,7 @@ copy, and cmd reads each command block whole before it runs it.
 
 `posix-env setup` is the only command that adds the default packages
 (posix-env, autoconf, automake, libtool, gettext-tools, pkgconf, diffutils,
-patch, file, gzip, libarchive, xz and zstd) or changes the user's settings:
+patch, file, gzip, libarchive, xz, zstd and less) or changes the user's settings:
 a Start menu entry and a Windows Terminal profile, both named "POSIX Shell"
 and both running `posix-env run`, and the environment's top directory on
 the user's `PATH`, so `posix-env` works in any new cmd window. That
