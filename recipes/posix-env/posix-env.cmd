@@ -148,6 +148,10 @@ rem long command lines ran off the right edge.
 set "CONDA_PREFIX=%POSIX_ENV_HOME%"
 set "PATH=%POSIX_ENV_HOME%\bin;%PATH%"
 for %%f in ("%POSIX_ENV_HOME%\etc\conda\activate.d\*.bat") do call "%%~f"
+rem posix-env in cmd started from the shell (bin/posix-env is for sh): this
+rem directory, which holds no other program.  After activation, which drops
+rem it from PATH.
+set "PATH=%PATH%;%POSIX_ENV_HOME:\=/%"
 rem The shell's status, as the package commands above pass theirs on.
 if defined ARGS (
   "%POSIX_ENV_HOME%\bin\sh.exe" -c "exec ""$@""" sh %ARGS%
