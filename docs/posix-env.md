@@ -180,7 +180,7 @@ them: Rust's standard library uses the wide Windows APIs and binary I/O.
 
 | Package | Programs |
 |---|---|
-| posix-env | `chmod`, `which`, `perlsh`; activation, `config.site`, the link objects. Depends on the packages up to winflexbison |
+| posix-env | `posix-env.cmd` (the launcher) and `posix-env` (its sh front end), `chmod`, `which`, `perlsh`; activation, `config.site`, the link objects. Depends on the packages up to micromamba |
 | brush | `sh`, `bash` (hard links to `brush`) |
 | uutils-coreutils | `coreutils` and a hard link for every utility it contains (`ls`, `cp`, `sort`, …) |
 | uutils-findutils | `find`, `xargs` |
@@ -191,6 +191,7 @@ them: Rust's standard library uses the wide Windows APIs and binary I/O.
 | m4 | `m4` |
 | winflexbison | `flex`, `lex`, `bison`, `yacc` |
 | scriptexe | `libexec\posix-env\scriptexe.exe`, copied by other packages, not on `PATH` |
+| micromamba | `libexec\posix-env\micromamba.exe`, the launcher's package manager, not on `PATH` |
 | autoconf | `autoconf`, `autoheader`, `autom4te`, `autoreconf`, `autoscan`, `autoupdate`, `ifnames` |
 | automake | `aclocal`, `automake` (and `-1.18` names) |
 | libtool | `libtool`, `libtoolize` |
@@ -211,7 +212,12 @@ them: Rust's standard library uses the wide Windows APIs and binary I/O.
 | libarchive | `bsdtar`, `bsdcpio`, `bsdcat`, `bsdunzip`; `tar`, `unzip` |
 | pcre2 | `pcre2grep`, `pcre2test` |
 | expat | `xmlwf` |
-| Libraries only | gmp, mpfr, readline, termcap, zlib, libb2, oniguruma |
+| less | `less`, `lessecho` |
+| bear | `bear` (and `bear-wrapper`, which it runs) |
+| tcl | `tclsh` |
+| expect | `expect` (Expect's commands for DejaGnu, on pipes) |
+| dejagnu | `runtest`, `dejagnu` |
+| Libraries only | gmp, mpfr, readline, termcap, zlib, libb2, oniguruma, libtre, libsystre |
 
 openssl has a recipe but does not build yet (see TODO.md).
 
@@ -225,9 +231,9 @@ defines 155 utilities, plus the special built-ins (`break`, `:`, `.`, `eval`,
 | Group | Count | Utilities |
 |---|---|---|
 | Shell built-ins (brush) | 15 | alias bg cd command fc fg getopts hash jobs read time type umask unalias wait |
-| posix-env packages | 78 | awk basename cat chmod cksum cmp comm cp csplit cut date dd df diff dirname du echo env expand expr false find fold gettext grep head iconv join kill lex¹ link ln ls m4 make mkdir more msgfmt mv ngettext nice nl nohup od paste patch pathchk pr printf pwd readlink realpath rm rmdir sed sh sleep sort split tail tee test timeout touch tr true tsort tty uname uncompress unexpand uniq unlink wc xargs xgettext yacc¹ zcat |
+| posix-env packages | 79 | awk basename cat chmod cksum cmp comm cp csplit cut date dd df diff dirname du echo env expand expr false file find fold gettext grep head iconv join kill lex¹ link ln ls m4 make mkdir more msgfmt mv ngettext nice nl nohup od paste patch pathchk pr printf pwd readlink realpath rm rmdir sed sh sleep sort split tail tee test timeout touch tr true tsort tty uname uncompress unexpand uniq unlink wc xargs xgettext yacc¹ zcat |
 | External toolchain (binutils) | 4 | ar nm strings strip |
-| Not provided | 17 | bc c17² compress ctags ed file³ gencat getconf id locale localedef logname mkfifo pax ulimit⁴ uudecode uuencode |
+| Not provided | 16 | bc c17² compress ctags ed gencat getconf id locale localedef logname mkfifo pax ulimit³ uudecode uuencode |
 | Not provided: interactive and terminal | 11 | cal ex man mesg stty tabs talk tput vi who write |
 | Not provided: administration, jobs, printing, mail, UUCP | 17 | at batch chgrp chown crontab fuser ipcrm ipcs logger lp mailx newgrp ps renice uucp uustat uux |
 | Not provided: SCCS | 10 | admin delta get prs rmdel sact sccs unget val what |
@@ -235,9 +241,7 @@ defines 155 utilities, plus the special built-ins (`break`, `:`, `.`, `eval`,
 
 1. `lex` and `yacc` are winflexbison's flex and `bison -y`.
 2. There is no `c17` driver; build systems call `gcc`.
-3. On Windows hosts libtool runs `file` only in its deplibs check, which
-   `config.site` replaces with `$OBJDUMP -f`.
-4. brush does not implement `ulimit` on Windows.
+3. brush does not implement `ulimit` on Windows.
 
 ## Speed
 
