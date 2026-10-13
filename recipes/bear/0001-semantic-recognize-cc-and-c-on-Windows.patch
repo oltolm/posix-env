@@ -1,0 +1,282 @@
+From 651d4fff99d79d022101de65a306bfc89fd6297f Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Tue, 13 Oct 2026 20:57:07 +0200
+Subject: [PATCH] semantic: recognize cc and c++ on Windows
+
+MinGW toolchains ship cc.exe and c++.exe (GCC in MinGW-w64, Clang in
+llvm-mingw), and make's default CC=cc runs them. The --version probe
+that classifies these names was Unix-only, so on Windows they were never
+recognized and bear -- make wrote an empty compilation database. The
+probe now runs on Windows too (the child alone is killed on timeout, as
+there is no process group), and .exe is dropped before the name is
+looked up.
+---
+ .../compilers/compiler_recognition.rs         |   6 +
+ .../src/interpreters/compilers/probe.rs       | 168 +++++++++++++-----
+ 2 files changed, 133 insertions(+), 41 deletions(-)
+
+diff --git a/crates/semantic/src/interpreters/compilers/compiler_recognition.rs b/crates/semantic/src/interpreters/compilers/compiler_recognition.rs
+index dca2ecb..1c1bf1d 100644
+--- a/crates/semantic/src/interpreters/compilers/compiler_recognition.rs
++++ b/crates/semantic/src/interpreters/compilers/compiler_recognition.rs
+@@ -104,6 +104,12 @@ impl CompilerRecognizer {
+         //    itself (`CachingProbe`) so the cost is at most
+         //    one fork+exec per unique compiler path per process.
+         let filename = executable_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
++        // Windows programs carry their extension: cc.exe is cc.
++        #[cfg(windows)]
++        let filename = match filename.len().checked_sub(4) {
++            Some(n) if filename.is_char_boundary(n) && filename[n..].eq_ignore_ascii_case(".exe") => &filename[..n],
++            _ => filename,
++        };
+         if AMBIGUOUS_NAMES.contains(&filename)
+             && let Some(t) = self.probe_canonical(executable_path)
+         {
+diff --git a/crates/semantic/src/interpreters/compilers/probe.rs b/crates/semantic/src/interpreters/compilers/probe.rs
+index 2bd66f0..5cb078f 100644
+--- a/crates/semantic/src/interpreters/compilers/probe.rs
++++ b/crates/semantic/src/interpreters/compilers/probe.rs
+@@ -30,11 +30,11 @@
+ use super::identity::CompilerType;
+ use std::path::Path;
+ 
+-#[cfg(unix)]
++#[cfg(any(unix, windows))]
+ use std::cell::RefCell;
+-#[cfg(unix)]
++#[cfg(any(unix, windows))]
+ use std::collections::HashMap;
+-#[cfg(unix)]
++#[cfg(any(unix, windows))]
+ use std::path::PathBuf;
+ 
+ /// `Send` (and not `Sync`) for the same reason as [`crate::Interpreter`]:
+@@ -68,20 +68,20 @@ pub trait CompilerProbe: Send {
+ /// which is itself Unix-only. On Windows `default_probe` returns
+ /// `NoProbe` directly -- caching a constant `None` would be pure
+ /// overhead.
+-#[cfg(unix)]
++#[cfg(any(unix, windows))]
+ pub(crate) struct CachingProbe<P: CompilerProbe> {
+     inner: P,
+     cache: RefCell<HashMap<PathBuf, Option<CompilerType>>>,
+ }
+ 
+-#[cfg(unix)]
++#[cfg(any(unix, windows))]
+ impl<P: CompilerProbe> CachingProbe<P> {
+     pub(crate) fn new(inner: P) -> Self {
+         Self { inner, cache: RefCell::new(HashMap::new()) }
+     }
+ }
+ 
+-#[cfg(unix)]
++#[cfg(any(unix, windows))]
+ impl<P: CompilerProbe> CompilerProbe for CachingProbe<P> {
+     fn probe(&self, executable_path: &Path) -> Option<CompilerType> {
+         if let Some(&hit) = self.cache.borrow().get(executable_path) {
+@@ -102,7 +102,7 @@ impl<P: CompilerProbe> CompilerProbe for CachingProbe<P> {
+ ///
+ /// On a Unix lib build neither use applies, so silence the dead-code
+ /// lint that would otherwise fire there.
+-#[cfg_attr(all(unix, not(test)), allow(dead_code))]
++#[cfg_attr(all(any(unix, windows), not(test)), allow(dead_code))]
+ pub(crate) struct NoProbe;
+ 
+ impl CompilerProbe for NoProbe {
+@@ -113,6 +113,8 @@ impl CompilerProbe for NoProbe {
+ 
+ #[cfg(unix)]
+ pub(crate) use unix::VersionProbe;
++#[cfg(windows)]
++pub(crate) use windows::VersionProbe;
+ 
+ /// The default probe for the current target. On Unix wraps a real
+ /// `VersionProbe` in a [`CachingProbe`] so each unique compiler path is
+@@ -121,11 +123,11 @@ pub(crate) use unix::VersionProbe;
+ /// by the regex layer) returns a `NoProbe`; caching a no-op would just be
+ /// overhead.
+ pub(crate) fn default_probe() -> Box<dyn CompilerProbe> {
+-    #[cfg(unix)]
++    #[cfg(any(unix, windows))]
+     {
+         Box::new(CachingProbe::new(VersionProbe::new()))
+     }
+-    #[cfg(not(unix))]
++    #[cfg(not(any(unix, windows)))]
+     {
+         Box::new(NoProbe)
+     }
+@@ -215,10 +217,44 @@ mod caching_tests {
+     }
+ }
+ 
++#[cfg(any(unix, windows))]
++/// Classify the combined `--version` output of a candidate compiler.
++///
++/// The rule set is intentionally narrow: a misclassification corrupts
++/// the compilation database (wrong flag-arity table), while a non-
++/// classification just falls back to the regex layer. We accept Clang
++/// and GCC and reject everything else.
++pub(crate) fn classify_version_output(stdout: &str, stderr: &str) -> Option<CompilerType> {
++    // Compilers print to stdout in practice, but the doc's PR #695 used
++    // stderr; Apple clang has historically used stderr too. Check both.
++    for haystack in [stdout, stderr] {
++        // Apple clang prints "Apple clang version ...", upstream LLVM prints
++        // "clang version ..."; both contain the substring "clang version".
++        if haystack.contains("clang version") {
++            return Some(CompilerType::compiler("clang"));
++        }
++        // GNU gcc prints a "Copyright (C) ... Free Software Foundation,
++        // Inc." line in every build. The leading "(GCC)" vendor tag is
++        // NOT reliable: distro and BSD-ports builds rewrite it to their
++        // own tag ("(Alpine 15.2.0)", "(Ubuntu 13.3.0-...)", "(FreeBSD
++        // Ports Collection)"), and when gcc is invoked as `cc` -- the
++        // case this probe exists for -- the string "gcc" does not appear
++        // at all. The FSF copyright is the only portable GCC signal.
++        // Clang is excluded above (it prints LLVM license text, never the
++        // FSF copyright), so this does not misclassify clang as gcc. See
++        // issue #711.
++        if haystack.contains("Free Software Foundation") {
++            return Some(CompilerType::compiler("gcc"));
++        }
++    }
++    None
++}
++
+ #[cfg(unix)]
+ mod unix {
+     use super::super::identity::CompilerType;
+     use super::CompilerProbe;
++    use super::classify_version_output;
+     use intercept::environment::{KEY_OS_MACOS_PRELOAD_PATH, KEY_OS_PRELOAD_PATH};
+     use std::os::unix::process::CommandExt;
+     use std::path::Path;
+@@ -341,38 +377,6 @@ mod unix {
+         }
+     }
+ 
+-    /// Classify the combined `--version` output of a candidate compiler.
+-    ///
+-    /// The rule set is intentionally narrow: a misclassification corrupts
+-    /// the compilation database (wrong flag-arity table), while a non-
+-    /// classification just falls back to the regex layer. We accept Clang
+-    /// and GCC and reject everything else.
+-    fn classify_version_output(stdout: &str, stderr: &str) -> Option<CompilerType> {
+-        // Compilers print to stdout in practice, but the doc's PR #695 used
+-        // stderr; Apple clang has historically used stderr too. Check both.
+-        for haystack in [stdout, stderr] {
+-            // Apple clang prints "Apple clang version ...", upstream LLVM prints
+-            // "clang version ..."; both contain the substring "clang version".
+-            if haystack.contains("clang version") {
+-                return Some(CompilerType::compiler("clang"));
+-            }
+-            // GNU gcc prints a "Copyright (C) ... Free Software Foundation,
+-            // Inc." line in every build. The leading "(GCC)" vendor tag is
+-            // NOT reliable: distro and BSD-ports builds rewrite it to their
+-            // own tag ("(Alpine 15.2.0)", "(Ubuntu 13.3.0-...)", "(FreeBSD
+-            // Ports Collection)"), and when gcc is invoked as `cc` -- the
+-            // case this probe exists for -- the string "gcc" does not appear
+-            // at all. The FSF copyright is the only portable GCC signal.
+-            // Clang is excluded above (it prints LLVM license text, never the
+-            // FSF copyright), so this does not misclassify clang as gcc. See
+-            // issue #711.
+-            if haystack.contains("Free Software Foundation") {
+-                return Some(CompilerType::compiler("gcc"));
+-            }
+-        }
+-        None
+-    }
+-
+     #[cfg(test)]
+     mod tests {
+         //! Requirements: recognition-ambiguous-name-probe
+@@ -593,3 +597,85 @@ mod unix {
+         }
+     }
+ }
++
++/// The `--version` probe on Windows, where MinGW toolchains ship `cc.exe`
++/// and `c++.exe` (GCC in MinGW-w64, Clang in llvm-mingw) and make's
++/// default `CC=cc` runs them.  Without a process group to kill, the child
++/// alone is killed on timeout, and its output is not waited for then: a
++/// grandchild holding the pipes open cannot stall recognition.
++#[cfg(windows)]
++mod windows {
++    use super::super::identity::CompilerType;
++    use super::CompilerProbe;
++    use super::classify_version_output;
++    use std::io::Read;
++    use std::path::Path;
++    use std::process::{Command, Stdio};
++    use std::thread;
++    use std::time::{Duration, Instant};
++
++    /// Runs `<exe> --version`, classifies the output. Default timeout: 2 seconds.
++    pub(crate) struct VersionProbe {
++        timeout: Duration,
++    }
++
++    impl VersionProbe {
++        pub(crate) fn new() -> Self {
++            Self { timeout: Duration::from_secs(2) }
++        }
++    }
++
++    impl CompilerProbe for VersionProbe {
++        fn probe(&self, executable_path: &Path) -> Option<CompilerType> {
++            let mut child = match Command::new(executable_path)
++                .arg("--version")
++                .stdin(Stdio::null())
++                .stdout(Stdio::piped())
++                .stderr(Stdio::piped())
++                .spawn()
++            {
++                Ok(c) => c,
++                Err(err) => {
++                    log::debug!("probe: spawn failed for {}: {err}", executable_path.display());
++                    return None;
++                }
++            };
++            let read = |pipe: Option<Box<dyn Read + Send>>| {
++                thread::spawn(move || {
++                    let mut buffer = Vec::new();
++                    if let Some(mut pipe) = pipe {
++                        let _ = pipe.read_to_end(&mut buffer);
++                    }
++                    buffer
++                })
++            };
++            let stdout = read(child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
++            let stderr = read(child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
++
++            let deadline = Instant::now() + self.timeout;
++            let status = loop {
++                match child.try_wait() {
++                    Ok(Some(status)) => break status,
++                    Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(5)),
++                    Ok(None) => {
++                        log::debug!("probe: {} timed out", executable_path.display());
++                        let _ = child.kill();
++                        let _ = child.wait();
++                        return None;
++                    }
++                    Err(err) => {
++                        log::debug!("probe: wait failed for {}: {err}", executable_path.display());
++                        return None;
++                    }
++                }
++            };
++            if !status.success() {
++                log::debug!("probe: {} exited with {:?}", executable_path.display(), status);
++                return None;
++            }
++            let stdout = stdout.join().unwrap_or_default();
++            let stderr = stderr.join().unwrap_or_default();
++            classify_version_output(&String::from_utf8_lossy(&stdout), &String::from_utf8_lossy(&stderr))
++        }
++    }
++}
+-- 
+2.56.0.windows.1
+

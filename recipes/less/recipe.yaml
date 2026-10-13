@@ -1,0 +1,65 @@
+context:
+  version: "710"
+
+package:
+  name: less
+  version: ${{ version }}
+
+source:
+  url: https://www.greenwoodsoftware.com/less/less-${{ version }}.tar.gz
+  sha256: d1008fb78dcae1323ddab664bcb352a61f022b1b131bd8018548e021d975ec7a
+  patches:
+    - 0001-Makefile.wng-PCRE2-as-a-regex-package.patch
+
+build:
+  number: 0
+  script:
+    interpreter: brush
+    content:
+      # less's native Windows build (the Windows console, not termcap), with
+      # PCRE2 as configure builds use.  libgcc is linked statically;
+      # posix-env's UTF-8 manifest, setlocale and binary I/O, as config.site
+      # adds them.
+      # The release ships the generated sources; extraction leaves them
+      # older than their inputs, and regenerating needs perl.
+      # They are read-only, and uutils' touch cannot set the times of a
+      # read-only file on Windows.
+      - chmod u+w help.c funcs.h lessmsg.inc
+      - touch help.c funcs.h lessmsg.inc
+      - >-
+        make -j"$(nproc)" -f Makefile.wng SHELL=sh REGEX_PACKAGE=pcre2
+        MINGW_REGEX_IPATH="-I$PREFIX/include" MINGW_REGEX_LPATH="-L$PREFIX/lib"
+        MINGW_REGEX_LIB=-lpcre2-8
+        XLDFLAGS="-static-libgcc -Wl,$BUILD_PREFIX/lib/posix-env/utf8-manifest.o
+        -Wl,--wrap=__imp_setlocale -Wl,--wrap=__imp__wsetlocale
+        -Wl,$BUILD_PREFIX/lib/posix-env/c-locale.o,-lmsvcrt
+        -Wl,$BUILD_PREFIX/lib/posix-env/binmode.o,-lmsvcrt,-lkernel32"
+      - mkdir -p "$PREFIX/bin" "$PREFIX/share/man/man1"
+      - cp less.exe lessecho.exe "$PREFIX/bin/"
+      - cp less.nro "$PREFIX/share/man/man1/less.1"
+      - cp lessecho.nro "$PREFIX/share/man/man1/lessecho.1"
+
+requirements:
+  build:
+    - posix-env
+  host:
+    - pcre2
+
+tests:
+  - script:
+      interpreter: cmd
+      content:
+        - less --version || exit /b 1
+        - echo hello> t.txt
+        - less -F t.txt | findstr /b hello || exit /b 1
+        # PCRE2: \d is a digit class.
+        - echo x1> d.txt
+        - less -F "+/\d" d.txt | findstr /b x1 || exit /b 1
+
+about:
+  homepage: https://www.greenwoodsoftware.com/less/
+  license: GPL-3.0-or-later
+  license_file:
+    - COPYING
+    - LICENSE
+  summary: Terminal pager

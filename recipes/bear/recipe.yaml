@@ -1,0 +1,52 @@
+context:
+  version: "4.2.2"
+
+package:
+  name: bear
+  version: ${{ version }}
+
+source:
+  url: https://github.com/rizsotto/Bear/archive/${{ version }}/bear-${{ version }}.tar.gz
+  sha256: 9f9d0236bf0751cb4f5d747c077697f396546ba1ad8653c2e9b7192ea47df14a
+  patches:
+    # cc and c++ (make's default CC=cc) were never recognized on Windows.
+    - 0001-semantic-recognize-cc-and-c-on-Windows.patch
+
+build:
+  number: 1
+  script:
+    interpreter: brush
+    content:
+      - cargo build --release --locked
+      # Upstream installs bin/bear as an sh script that execs
+      # PREFIX/libexec/bear/bin/bear-driver by absolute path, which does not
+      # survive relocation.  The driver finds bear-wrapper next to itself
+      # and does not care about its own name: install it as bear.exe.
+      - mkdir -p "$PREFIX/bin" "$PREFIX/share/man/man1" "$PREFIX/share/doc/bear"
+      - cp target/release/bear-driver.exe "$PREFIX/bin/bear.exe"
+      - cp target/release/bear-wrapper.exe "$PREFIX/bin/"
+      - cp man/bear.1 "$PREFIX/share/man/man1/"
+      - cp README.md "$PREFIX/share/doc/bear/"
+
+requirements:
+  build:
+    - posix-env
+
+tests:
+  - script:
+      interpreter: cmd
+      content:
+        - bear --version || exit /b 1
+        - echo int main(void){return 0;}> t.c
+        - bear -- gcc -c t.c || exit /b 1
+        - findstr /c:"t.c" compile_commands.json || exit /b 1
+        # cc, as make runs it by default.
+        - del compile_commands.json
+        - bear -- cc -c t.c || exit /b 1
+        - findstr /c:"t.c" compile_commands.json || exit /b 1
+
+about:
+  homepage: https://github.com/rizsotto/Bear
+  license: GPL-3.0-or-later
+  license_file: COPYING
+  summary: Generates a compilation database for clang tooling
