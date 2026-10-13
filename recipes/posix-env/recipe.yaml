@@ -15,7 +15,7 @@ source:
   - path: binmode.c
 
 build:
-  number: 22
+  number: 23
   script:
     interpreter: brush
     content:
@@ -35,8 +35,8 @@ build:
       - cp "$RECIPE_DIR/posix-env" "$PREFIX/bin/posix-env"
       # The launcher, at the top of the environment, and its Start menu and
       # Windows Terminal entries.
-      - cp "$RECIPE_DIR/posix-shell.cmd" "$PREFIX/posix-shell.cmd"
-      - cp "$RECIPE_DIR/posix-shell-entries.ps1" "$PREFIX/share/posix-env/"
+      - cp "$RECIPE_DIR/posix-env.cmd" "$PREFIX/posix-env.cmd"
+      - cp "$RECIPE_DIR/posix-env-entries.ps1" "$PREFIX/share/posix-env/"
 
 requirements:
   build:
@@ -64,10 +64,10 @@ tests:
       interpreter: cmd
       content:
         - which sh
-        - call "%PREFIX%\posix-shell.cmd" help | findstr /c:"install NAME" || exit /b 1
-        - call "%PREFIX%\posix-shell.cmd" list | findstr /c:"micromamba" || exit /b 1
-        # posix-env forwards to the launcher, which only posix-shell.cmd sets.
-        - sh -c "POSIX_ENV_LAUNCHER= posix-env list 2>&1 | grep -q posix-shell.cmd" || exit /b 1
+        - call "%PREFIX%\posix-env.cmd" help | findstr /c:"install NAME" || exit /b 1
+        - call "%PREFIX%\posix-env.cmd" list | findstr /c:"micromamba" || exit /b 1
+        # posix-env forwards to the launcher, which only posix-env.cmd sets.
+        - sh -c "POSIX_ENV_LAUNCHER= posix-env list 2>&1 | grep -q posix-env.cmd" || exit /b 1
         # libtool accepts x86-64 import libraries also in configures that run
         # without config.site (gcc's target libraries).
         - sh -c "case \"$lt_cv_deplibs_check_method\" in *pei?-x86-64*) ;; *) exit 1;; esac" || exit /b 1

@@ -1,14 +1,14 @@
-# Creates the user's entries for the environment's posix-shell.cmd: a Start
+# Creates the user's entries for the environment's posix-env.cmd: a Start
 # menu shortcut and a Windows Terminal profile, both running
-# "posix-shell.cmd run".  posix-shell.cmd runs this when an entry is missing
+# "posix-env.cmd run".  posix-env.cmd runs this when an entry is missing
 # or starts another launcher; existing entries are rewritten.  -Remove
-# deletes both.  Installed as <prefix>\share\posix-env\posix-shell-entries.ps1.
-#   powershell -NoProfile -ExecutionPolicy Bypass -File posix-shell-entries.ps1 [-Remove]
+# deletes both.  Installed as <prefix>\share\posix-env\posix-env-entries.ps1.
+#   powershell -NoProfile -ExecutionPolicy Bypass -File posix-env-entries.ps1 [-Remove]
 param([switch]$Remove)
 $ErrorActionPreference = 'Stop'
 
 $name = 'POSIX Shell'
-$launcher = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\posix-shell.cmd'))
+$launcher = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\posix-env.cmd'))
 $shortcut = Join-Path ([Environment]::GetFolderPath('Programs')) "$name.lnk"
 # Windows Terminal reads profile fragments from this directory (per user,
 # for both the Store and the unpackaged installation).

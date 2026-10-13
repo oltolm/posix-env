@@ -1,9 +1,9 @@
 @echo off
 rem The posix-env launcher, installed at the top of the environment: opens a
 rem POSIX shell (brush) in it, runs commands in it and manages its packages
-rem from the channel named in its .condarc.  "posix-shell help" lists the
+rem from the channel named in its .condarc.  "posix-env help" lists the
 rem commands; double-clicked (no arguments) it opens the shell.  In the
-rem shell, the posix-env command forwards to this script.
+rem shell, the posix-env sh script hands its commands to this script.
 rem
 rem   POSIX_ENV_TOOLCHAIN  the compiler's bin directory, put on PATH
 rem                        (default C:\msys64\ucrt64\bin)
@@ -37,8 +37,8 @@ if "%VERB%"=="/?" goto help
 set "KNOWN="
 for %%v in (run install remove list update) do if /i "%VERB%"=="%%v" set "KNOWN=1"
 if not defined KNOWN (
-  1>&2 echo posix-shell: unknown command "%VERB%"
-  1>&2 echo Run "posix-shell help" for the commands.
+  1>&2 echo posix-env: unknown command "%VERB%"
+  1>&2 echo Run "posix-env help" for the commands.
   exit /b 2
 )
 
@@ -57,13 +57,13 @@ if /i "%VERB%"=="list" (
   "%MAMBA%" list -p "%POSIX_ENV_HOME%"
   exit /b
 )
-if /i not "%VERB%"=="update" if not defined ARGS (1>&2 echo usage: posix-shell %VERB% NAME...& exit /b 2)
+if /i not "%VERB%"=="update" if not defined ARGS (1>&2 echo usage: posix-env %VERB% NAME...& exit /b 2)
 
 rem The channel the environment was created from: "  - URL" in .condarc.
 set "CHANNEL="
 if exist "%POSIX_ENV_HOME%\.condarc" for /f "usebackq tokens=1,*" %%a in ("%POSIX_ENV_HOME%\.condarc") do if "%%a"=="-" if not defined CHANNEL set "CHANNEL=%%b"
 if not defined CHANNEL (
-  1>&2 echo posix-shell: no channel in %POSIX_ENV_HOME%\.condarc
+  1>&2 echo posix-env: no channel in %POSIX_ENV_HOME%\.condarc
   exit /b 1
 )
 set PACKAGES=posix-env autoconf automake libtool gettext-tools pkgconf ^
@@ -99,11 +99,11 @@ if /i "%VERB%"=="install" (
 )
 
 :help
-echo usage: posix-shell COMMAND [ARGUMENTS]
+echo usage: posix-env COMMAND [ARGUMENTS]
 echo.
 echo   run               open a POSIX shell in the posix-env environment
-echo   run COMMAND...    run a command in it (posix-shell run make -j8)
-echo   install NAME...   add packages (posix-shell install dejagnu)
+echo   run COMMAND...    run a command in it (posix-env run make -j8)
+echo   install NAME...   add packages (posix-env install dejagnu)
 echo   remove NAME...    remove packages
 echo   list              list the installed packages
 echo   update            update all packages and add missing default ones
@@ -115,7 +115,7 @@ exit /b 0
 
 :run
 rem A Start menu entry and a Windows Terminal profile, both "POSIX Shell",
-rem start "posix-shell run"; posix-shell-entries.ps1 creates them, or
+rem start "posix-env run"; posix-env-entries.ps1 creates them, or
 rem rewrites them when they start another launcher (one in a source
 rem checkout, before the launcher was installed), and -Remove deletes them.
 set "ENTRY=%APPDATA%\Microsoft\Windows\Start Menu\Programs\POSIX Shell.lnk"
@@ -125,7 +125,7 @@ if not exist "%ENTRY%" set "ENTRIES="
 if not exist "%FRAGMENT%" set "ENTRIES="
 rem The fragment is JSON: backslashes doubled.
 if defined ENTRIES "%SystemRoot%\System32\find.exe" /i "%LAUNCHER:\=\\%" "%FRAGMENT%" >nul || set "ENTRIES="
-if not defined ENTRIES "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "%POSIX_ENV_HOME%\share\posix-env\posix-shell-entries.ps1"
+if not defined ENTRIES "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "%POSIX_ENV_HOME%\share\posix-env\posix-env-entries.ps1"
 
 if not defined POSIX_ENV_TOOLCHAIN set "POSIX_ENV_TOOLCHAIN=C:\msys64\ucrt64\bin"
 if not exist "%POSIX_ENV_TOOLCHAIN%\gcc.exe" echo Warning: no gcc in %POSIX_ENV_TOOLCHAIN% (set POSIX_ENV_TOOLCHAIN).

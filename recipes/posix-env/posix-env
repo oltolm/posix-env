@@ -1,11 +1,10 @@
 #!/bin/sh
-# posix-env COMMAND [ARGUMENTS]: the launcher's commands in the shell
-# (install, remove, list, update, run, help), as "posix-shell COMMAND" runs
-# them from cmd.  posix-shell.cmd names itself in POSIX_ENV_LAUNCHER when
-# it starts the shell.
+# posix-env COMMAND [ARGUMENTS] in the shell: hands the command to the
+# launcher, posix-env.cmd, which takes the same commands in cmd and names
+# itself in POSIX_ENV_LAUNCHER when it starts the shell.
 if test -z "$POSIX_ENV_LAUNCHER"; then
-  echo "posix-env: this shell was not started by posix-shell.cmd" >&2
-  echo "  (POSIX_ENV_LAUNCHER is not set); run posix-shell.cmd from cmd" >&2
+  echo "posix-env: this shell was not started by posix-env.cmd" >&2
+  echo "  (POSIX_ENV_LAUNCHER is not set); run posix-env.cmd from cmd" >&2
   exit 1
 fi
 if test $# -eq 0; then

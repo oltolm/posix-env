@@ -1,7 +1,7 @@
 @echo off
 rem Sets up the posix-env environment from this checkout's channel (output\)
-rem and hands over to the launcher installed in it, posix-shell.cmd at the
-rem top of the environment, which takes the same commands ("posix-shell
+rem and hands over to the launcher installed in it, posix-env.cmd at the
+rem top of the environment, which takes the same commands ("posix-env
 rem help").  Once the environment exists, the checkout is not needed: the
 rem Start menu entry and the Windows Terminal profile start the installed
 rem launcher, which installs and updates from the channel in the
@@ -24,7 +24,7 @@ set "FRESH=1"
 :have_env
 rem An environment from before the launcher was packaged ("install" keeps
 rem the installed posix-env).
-if exist "%POSIX_ENV_HOME%\posix-shell.cmd" goto have_launcher
+if exist "%POSIX_ENV_HOME%\posix-env.cmd" goto have_launcher
 "%MAMBA%" update -y -q -p "%POSIX_ENV_HOME%" -c "%CHANNEL%" --override-channels posix-env || (pause & exit /b 1)
 :have_launcher
 if exist "%POSIX_ENV_HOME%\.condarc" goto have_channel
@@ -32,12 +32,12 @@ if exist "%POSIX_ENV_HOME%\.condarc" goto have_channel
 >>"%POSIX_ENV_HOME%\.condarc" echo   - %CHANNEL%
 :have_channel
 rem The default packages are the installed launcher's to name.
-if defined FRESH call "%POSIX_ENV_HOME%\posix-shell.cmd" update || (pause & exit /b 1)
+if defined FRESH call "%POSIX_ENV_HOME%\posix-env.cmd" update || (pause & exit /b 1)
 
 rem Double-clicked: open the shell, in the home directory.
 if "%~1"=="" if /i "%CD%\"=="%TOOLS%" (
   cd /d "%USERPROFILE%"
-  "%POSIX_ENV_HOME%\posix-shell.cmd" run
+  "%POSIX_ENV_HOME%\posix-env.cmd" run
   exit /b
 )
-"%POSIX_ENV_HOME%\posix-shell.cmd" %*
+"%POSIX_ENV_HOME%\posix-env.cmd" %*
