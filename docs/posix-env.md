@@ -44,9 +44,11 @@ libtool, gettext-tools, pkgconf, diffutils, patch, file, gzip, libarchive, xz
 and zstd, and records the channel in `.condarc`. An environment from before
 the launcher was packaged gets posix-env updated. `run` adds a Start menu
 entry and a Windows Terminal profile, both named "POSIX Shell" and both
-running the installed `posix-env run`
-(`share\posix-env\posix-env-entries.ps1 -Remove` in the environment
-deletes them).
+running the installed `posix-env run`, and puts the environment's top
+directory on the user's `PATH`, so `posix-env` works in any new cmd window.
+That directory holds no program but `posix-env.cmd`: the tools in `bin`
+stay off the Windows `PATH`. `share\posix-env\posix-env-entries.ps1
+-Remove` in the environment undoes all three.
 
 | Variable | Meaning | Default |
 |---|---|---|

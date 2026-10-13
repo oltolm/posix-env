@@ -15,7 +15,7 @@ source:
   - path: binmode.c
 
 build:
-  number: 23
+  number: 24
   script:
     interpreter: brush
     content:
