@@ -22,8 +22,8 @@ build:
       # adds them.
       # The release ships the generated sources; extraction leaves them
       # older than their inputs, and regenerating needs perl.
-      # They are read-only, and uutils' touch cannot set the times of a
-      # read-only file on Windows.
+      # They are read-only, and Windows does not let anyone change the
+      # times of a read-only file.
       - chmod u+w help.c funcs.h lessmsg.inc
       - touch help.c funcs.h lessmsg.inc
       - >-
