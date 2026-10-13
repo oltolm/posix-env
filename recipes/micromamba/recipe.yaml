@@ -1,0 +1,38 @@
+# micromamba, the upstream release binary: the launcher installed in the
+# environment manages its packages with it.
+context:
+  version: "2.9.0"
+
+package:
+  name: micromamba
+  version: ${{ version }}
+
+source:
+  url: https://github.com/mamba-org/micromamba-releases/releases/download/${{ version }}-0/micromamba-win-64.exe
+  sha256: a6d804394b2418991c4e29562853eaace2f2ce9d9da661a98e74e02e8dbb44b0
+  file_name: micromamba.exe
+
+build:
+  number: 0
+  script:
+    interpreter: brush
+    content:
+      # Not in bin: package commands go through the launcher, which pins the
+      # environment's channel.
+      - mkdir -p "$PREFIX/libexec/posix-env"
+      - cp micromamba.exe "$PREFIX/libexec/posix-env/"
+
+requirements:
+  build:
+    - posix-env
+
+tests:
+  - script:
+      interpreter: cmd
+      content:
+        - '"%PREFIX%\libexec\posix-env\micromamba.exe" --version || exit /b 1'
+
+about:
+  homepage: https://github.com/mamba-org/mamba
+  license: BSD-3-Clause
+  summary: Package manager for conda packages, used by the posix-env launcher

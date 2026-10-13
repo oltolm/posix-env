@@ -1,5 +1,6 @@
 # The native POSIX environment: brush as sh, the uutils and GNU tools, the
-# activation script and config.site.  The toolchain stays external.
+# activation script, config.site and the launcher.  The toolchain stays
+# external.
 package:
   name: posix-env
   version: 0.1.0
@@ -14,7 +15,7 @@ source:
   - path: binmode.c
 
 build:
-  number: 19
+  number: 22
   script:
     interpreter: brush
     content:
@@ -32,6 +33,10 @@ build:
       - cp "$RECIPE_DIR/deactivate.bat" "$PREFIX/etc/conda/deactivate.d/posix-env.bat"
       # posix-env install NAME and the launcher's other commands in the shell.
       - cp "$RECIPE_DIR/posix-env" "$PREFIX/bin/posix-env"
+      # The launcher, at the top of the environment, and its Start menu and
+      # Windows Terminal entries.
+      - cp "$RECIPE_DIR/posix-shell.cmd" "$PREFIX/posix-shell.cmd"
+      - cp "$RECIPE_DIR/posix-shell-entries.ps1" "$PREFIX/share/posix-env/"
 
 requirements:
   build:
@@ -47,6 +52,8 @@ requirements:
     - m4
     - scriptexe
     - winflexbison
+    # The launcher's package commands.
+    - micromamba
 
 tests:
   - requirements:
@@ -57,6 +64,8 @@ tests:
       interpreter: cmd
       content:
         - which sh
+        - call "%PREFIX%\posix-shell.cmd" help | findstr /c:"install NAME" || exit /b 1
+        - call "%PREFIX%\posix-shell.cmd" list | findstr /c:"micromamba" || exit /b 1
         # posix-env forwards to the launcher, which only posix-shell.cmd sets.
         - sh -c "POSIX_ENV_LAUNCHER= posix-env list 2>&1 | grep -q posix-shell.cmd" || exit /b 1
         # libtool accepts x86-64 import libraries also in configures that run

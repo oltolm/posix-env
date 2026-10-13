@@ -13,7 +13,9 @@ rattler-build and installed with micromamba. Only the local channel in
 
 ## Using it
 
-`tools\posix-shell.cmd` is the launcher; it takes a command:
+The launcher is `posix-shell.cmd` at the top of the environment
+(`%USERPROFILE%\posix-env\posix-shell.cmd`), installed by the posix-env
+package; it takes a command:
 
 | Command | Does |
 |---|---|
@@ -26,18 +28,29 @@ rattler-build and installed with micromamba. Only the local channel in
 | `posix-shell help` | lists the commands (also without a command) |
 
 In the shell, `posix-env COMMAND` does the same (`posix-env install
-dejagnu`). Double-clicked, the launcher opens the shell.
+dejagnu`). Double-clicked, the launcher opens the shell. Packages come from
+the channel named in the environment's `.condarc`, and the package commands
+use the environment's own micromamba (the micromamba package, the upstream
+release binary), so an installed environment needs no source checkout.
+`posix-shell update` can replace the launcher and micromamba while they run:
+micromamba runs from a temporary copy, and cmd reads each command block
+whole before it runs it.
 
-On first use it creates the environment in `%USERPROFILE%\posix-env` (per
-user only) from the local channel, with posix-env, autoconf, automake,
+`tools\posix-shell.cmd` in a checkout sets the environment up from the
+checkout's channel (`output\`) and then hands every command to the installed
+launcher. On first use it creates `%USERPROFILE%\posix-env` (per user only,
+`POSIX_ENV_HOME` names another place) with posix-env, autoconf, automake,
 libtool, gettext-tools, pkgconf, diffutils, patch, file, gzip, libarchive, xz
-and zstd, and `run` adds a Start menu entry and a Windows Terminal profile, both
-named "POSIX Shell" and both running `posix-shell run`
-(`tools\posix-shell-entries.ps1 -Remove` deletes them).
+and zstd, and records the channel in `.condarc`. An environment from before
+the launcher was packaged gets posix-env updated. `run` adds a Start menu
+entry and a Windows Terminal profile, both named "POSIX Shell" and both
+running the installed `posix-shell run`
+(`share\posix-env\posix-shell-entries.ps1 -Remove` in the environment
+deletes them).
 
 | Variable | Meaning | Default |
 |---|---|---|
-| `POSIX_ENV_HOME` | the environment | `%USERPROFILE%\posix-env` |
+| `POSIX_ENV_HOME` | the environment `tools\posix-shell.cmd` sets up | `%USERPROFILE%\posix-env` |
 | `POSIX_ENV_TOOLCHAIN` | the compiler's `bin` directory, put on `PATH` | `C:\msys64\ucrt64\bin` |
 | `POSIX_ENV_GIT` | a directory with `git.exe`, put on `PATH` if it has one | `%ProgramFiles%\Git\cmd` |
 | `POSIX_ENV_EXTRA_PATH` | more directories for `PATH` | none |
