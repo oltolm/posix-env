@@ -34,8 +34,8 @@ if exist "%POSIX_ENV_HOME%\.condarc" goto have_channel
 rem The default packages are the installed launcher's to name.
 if defined FRESH call "%POSIX_ENV_HOME%\posix-env.cmd" update || (pause & exit /b 1)
 rem A new environment, once: the Start menu entry, the Terminal profile and
-rem the user's PATH (posix-env in cmd).
-if defined FRESH "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "%POSIX_ENV_HOME%\share\posix-env\posix-env-entries.ps1" -AddPath
+rem the user's PATH (posix-env in cmd).  Nothing else changes them.
+if defined FRESH "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "%POSIX_ENV_HOME%\share\posix-env\posix-env-entries.ps1"
 
 rem Double-clicked: open the shell, in the home directory.
 if "%~1"=="" if /i "%CD%\"=="%TOOLS%" (

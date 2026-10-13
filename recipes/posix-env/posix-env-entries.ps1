@@ -1,14 +1,14 @@
 # Sets up the user's access to the environment's posix-env.cmd: a Start
-# menu shortcut and a Windows Terminal profile, both running
-# "posix-env.cmd run", and with -AddPath the environment's top directory on
-# the user's PATH, so "posix-env" works in cmd.  That directory holds no
-# program but posix-env.cmd; the tools in bin stay off the Windows PATH.
-# Setting up an environment runs this with -AddPath, once; posix-env.cmd run
-# runs it without when an entry is missing or starts another launcher, and
-# never changes PATH.  Existing entries are rewritten.  -Remove undoes all
-# three.  Installed as <prefix>\share\posix-env\posix-env-entries.ps1.
-#   powershell -NoProfile -ExecutionPolicy Bypass -File posix-env-entries.ps1 [-AddPath | -Remove]
-param([switch]$AddPath, [switch]$Remove)
+# menu shortcut and a Windows Terminal profile, both "POSIX Shell" running
+# "posix-env.cmd run", and the environment's top directory on the user's
+# PATH, so "posix-env" works in cmd.  That directory holds no program but
+# posix-env.cmd; the tools in bin stay off the Windows PATH.  Setting up an
+# environment runs this once; nothing else changes these settings, so run
+# it again to restore them.  Existing entries are rewritten.  -Remove
+# undoes all three.  Installed as
+# <prefix>\share\posix-env\posix-env-entries.ps1.
+#   powershell -NoProfile -ExecutionPolicy Bypass -File posix-env-entries.ps1 [-Remove]
+param([switch]$Remove)
 $ErrorActionPreference = 'Stop'
 
 $name = 'POSIX Shell'
@@ -49,6 +49,7 @@ if ($Remove) {
   Remove-Item -Force -ErrorAction SilentlyContinue $shortcut, $fragment
   if (Test-Path $fragmentDir) { Remove-Item -Force -Recurse $fragmentDir }
   Set-UserPath { param($dirs) $dirs | Where-Object { -not (Test-Home $_) } }
+  Write-Host "Removed the Start menu entry and the Windows Terminal profile `"$name`"."
   return
 }
 
@@ -79,6 +80,5 @@ if ($Remove) {
   [IO.File]::WriteAllText($fragment, ($profile | ConvertTo-Json -Depth 4), (New-Object Text.UTF8Encoding $false))
 }
 
-if ($AddPath) {
-  Set-UserPath { param($dirs) if ($dirs | Where-Object { Test-Home $_ }) { $dirs } else { $dirs + $home_ } }
-}
+Write-Host "Added a Start menu entry and a Windows Terminal profile `"$name`"."
+Set-UserPath { param($dirs) if ($dirs | Where-Object { Test-Home $_ }) { $dirs } else { $dirs + $home_ } }

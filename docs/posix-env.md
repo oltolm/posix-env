@@ -47,10 +47,9 @@ Start menu entry and a Windows Terminal profile, both named "POSIX Shell"
 and both running the installed `posix-env run`, and its top directory on
 the user's `PATH`, so `posix-env` works in any new cmd window. That
 directory holds no program but `posix-env.cmd`: the tools in `bin` stay off
-the Windows `PATH`. `PATH` is changed only then; `run` recreates a missing
-Start menu entry or Terminal profile but never touches `PATH`.
-`share\posix-env\posix-env-entries.ps1 -Remove` in the environment undoes
-all three.
+the Windows `PATH`. These settings are made only then; `run` only starts
+the shell. `share\posix-env\posix-env-entries.ps1` in the environment sets
+them up again, and with `-Remove` undoes all three.
 
 | Variable | Meaning | Default |
 |---|---|---|
