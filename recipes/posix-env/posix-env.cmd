@@ -115,10 +115,10 @@ exit /b 0
 
 :run
 rem A Start menu entry and a Windows Terminal profile, both "POSIX Shell",
-rem start "posix-env run", and the user's PATH has this directory, for
-rem posix-env in cmd.  posix-env-entries.ps1 sets them up, or rewrites the
-rem entries when they start another launcher (one in a source checkout,
-rem before the launcher was installed), and -Remove undoes them.
+rem start "posix-env run"; posix-env-entries.ps1 creates them, or rewrites
+rem them when they start another launcher (one in a source checkout, before
+rem the launcher was installed).  The user's PATH is left alone: setting up
+rem the environment adds this directory once, and -Remove takes it out.
 set "ENTRY=%APPDATA%\Microsoft\Windows\Start Menu\Programs\POSIX Shell.lnk"
 set "FRAGMENT=%LOCALAPPDATA%\Microsoft\Windows Terminal\Fragments\posix-env\posix-shell.json"
 set "ENTRIES=1"
@@ -126,7 +126,6 @@ if not exist "%ENTRY%" set "ENTRIES="
 if not exist "%FRAGMENT%" set "ENTRIES="
 rem The fragment is JSON: backslashes doubled.
 if defined ENTRIES "%SystemRoot%\System32\find.exe" /i "%LAUNCHER:\=\\%" "%FRAGMENT%" >nul || set "ENTRIES="
-if defined ENTRIES "%SystemRoot%\System32\reg.exe" query HKCU\Environment /v Path 2>nul | "%SystemRoot%\System32\find.exe" /i "%POSIX_ENV_HOME%" >nul || set "ENTRIES="
 if not defined ENTRIES "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "%POSIX_ENV_HOME%\share\posix-env\posix-env-entries.ps1"
 
 if not defined POSIX_ENV_TOOLCHAIN set "POSIX_ENV_TOOLCHAIN=C:\msys64\ucrt64\bin"

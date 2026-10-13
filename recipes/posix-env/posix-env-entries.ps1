@@ -1,13 +1,14 @@
 # Sets up the user's access to the environment's posix-env.cmd: a Start
 # menu shortcut and a Windows Terminal profile, both running
-# "posix-env.cmd run", and the environment's top directory on the user's
-# PATH, so "posix-env" works in cmd.  That directory holds no program but
-# posix-env.cmd; the tools in bin stay off the Windows PATH.  posix-env.cmd
-# runs this when something is missing or starts another launcher; existing
-# entries are rewritten.  -Remove undoes all three.  Installed as
-# <prefix>\share\posix-env\posix-env-entries.ps1.
-#   powershell -NoProfile -ExecutionPolicy Bypass -File posix-env-entries.ps1 [-Remove]
-param([switch]$Remove)
+# "posix-env.cmd run", and with -AddPath the environment's top directory on
+# the user's PATH, so "posix-env" works in cmd.  That directory holds no
+# program but posix-env.cmd; the tools in bin stay off the Windows PATH.
+# Setting up an environment runs this with -AddPath, once; posix-env.cmd run
+# runs it without when an entry is missing or starts another launcher, and
+# never changes PATH.  Existing entries are rewritten.  -Remove undoes all
+# three.  Installed as <prefix>\share\posix-env\posix-env-entries.ps1.
+#   powershell -NoProfile -ExecutionPolicy Bypass -File posix-env-entries.ps1 [-AddPath | -Remove]
+param([switch]$AddPath, [switch]$Remove)
 $ErrorActionPreference = 'Stop'
 
 $name = 'POSIX Shell'
@@ -30,6 +31,8 @@ function Set-UserPath([scriptblock]$change) {
     if ($new -eq $old) { return }
     $key.SetValue('Path', $new, 'ExpandString')
   } finally { $key.Close() }
+  if ($Remove) { Write-Host "Removed $home_ from your PATH." }
+  else { Write-Host "Added $home_ to your PATH: posix-env works in new cmd windows." }
   # Tell Explorer, so that programs started from now on see the new PATH.
   Add-Type -Namespace PosixEnv -Name Native -MemberDefinition @'
 [DllImport("user32.dll", CharSet = CharSet.Unicode)]
@@ -76,4 +79,6 @@ if ($Remove) {
   [IO.File]::WriteAllText($fragment, ($profile | ConvertTo-Json -Depth 4), (New-Object Text.UTF8Encoding $false))
 }
 
-Set-UserPath { param($dirs) if ($dirs | Where-Object { Test-Home $_ }) { $dirs } else { $dirs + $home_ } }
+if ($AddPath) {
+  Set-UserPath { param($dirs) if ($dirs | Where-Object { Test-Home $_ }) { $dirs } else { $dirs + $home_ } }
+}
