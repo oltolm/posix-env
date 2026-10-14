@@ -85,7 +85,10 @@ build RECIPE [RECIPE...] [-- rattler-build options]
 - `build.cmd` builds recipes from `recipes\` into `output\` with only the
   local channel. `PATH` holds System32, the toolchain (`POSIX_ENV_TOOLCHAIN`)
   and git (`POSIX_ENV_GIT`, default `%ProgramFiles%\Git\cmd`); everything
-  else comes from the build environment.
+  else comes from the build environment. A package already in `output\` is
+  skipped ("Skipping build for ..."): rattler-build would keep the old
+  file's size and hash in `repodata.json`, and installs would fail. Raise
+  `build.number` to build a changed recipe.
 
 Recipe conventions:
 

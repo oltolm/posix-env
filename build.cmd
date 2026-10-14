@@ -7,6 +7,11 @@ rem channel is given.  The toolchain is external; POSIX_ENV_TOOLCHAIN names
 rem its bin directory.  rattler-build itself needs git for git sources;
 rem POSIX_ENV_GIT names a directory with git.exe and nothing else of note.
 rem Run tools\prefill.ps1 first to take sources from local copies.
+rem
+rem A package already in output\ is not built again: rattler-build keeps a
+rem file's repodata.json entry when the file is replaced, so a rebuild under
+rem the same build number leaves a wrong size and hash in the index, and
+rem installs fail.  Raise build.number to build a changed recipe.
 setlocal
 set "ROOT=%~dp0"
 set "ROOT=%ROOT:~0,-1%"
@@ -25,4 +30,4 @@ goto args
 
 :run
 if not defined RECIPES (echo usage: build RECIPE... [-- options] & exit /b 2)
-"%ROOT%\tools\rattler-build.exe" build %RECIPES% --output-dir "%ROOT%\output" -c "%CHANNEL%" %1 %2 %3 %4 %5 %6 %7 %8 %9
+"%ROOT%\tools\rattler-build.exe" build %RECIPES% --output-dir "%ROOT%\output" -c "%CHANNEL%" --skip-existing local %1 %2 %3 %4 %5 %6 %7 %8 %9
