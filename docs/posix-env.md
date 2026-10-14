@@ -246,21 +246,26 @@ defines 155 utilities, plus the special built-ins (`break`, `:`, `.`, `eval`,
 
 ## Speed
 
-Measured with the MSYS2-era prototype of this environment (same tools, same
-machine, idle, release builds), against MSYS2's bash and coreutils:
+Measured 2026-10-14 with posix-env 31 (brush 11, uutils-coreutils 11)
+against MSYS2's bash and coreutils, same machine (16 threads), same gcc,
+best of three runs. Each `configure` runs in a fresh build directory; GCC
+and libiberty get the options of a native GCC build (`--build`, `--host`
+and `--target` x86_64-w64-mingw32, `--enable-languages=c,c++,lto`, ...).
 
 | Workload | Native | MSYS | Ratio |
 |---|---|---|---|
-| zlib `configure` | 7.6 s | 21.6 s | 2.8× |
-| GCC top-level `configure` | 7.7 s | 19.5 s | 2.5× |
-| libiberty `configure` | 24.9 s | 42.4 s | 1.7× |
-| Start an external program, 500× | 4.1 s | 9.8 s | 2.4× |
-| `x=$(echo … \| tr …)`, 500× | 4.3 s | 20.8 s | 4.8× |
-| Shell-only loop, 100k iterations | 1.5 s | 1.4 s | 1.0× |
+| zlib 1.3.2 `configure` | 1.1 s | 2.4 s | 2.1× |
+| GCC top-level `configure` | 6.3 s | 19.9 s | 3.2× |
+| libiberty `configure` | 19.6 s | 46.2 s | 2.4× |
+| m4 1.4.21 `configure` | 75.2 s | 144.7 s | 1.9× |
+| Start an external program (`uname`), 500× | 2.4 s | 7.5 s | 3.2× |
+| `x=$(echo … \| tr …)`, 500× | 2.5 s | 15.5 s | 6.2× |
+| Shell-only loop, 100k iterations | 1.15 s | 0.43 s | 0.37× |
 
-Interpreting shell code is equally fast; the difference is process creation.
-In m4's configure (113 s), gcc takes 44 % of the time and uutils `rm`, `cat`
-and `mv` 27 %; brush itself takes under 3 %.
+The gain is process creation: starting a program and command substitution
+are three to six times faster than under MSYS. bash interprets plain shell
+code faster than brush (the loop), but configure scripts spend their time
+in the programs they start, not in the shell.
 
 ## Patches
 
