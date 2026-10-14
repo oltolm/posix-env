@@ -24,6 +24,7 @@ package; it takes a command:
 | `posix-env install NAME...` | adds packages (`posix-env install dejagnu`) |
 | `posix-env remove NAME...` | removes packages |
 | `posix-env list` | lists the installed packages |
+| `posix-env search [NAME]` | lists the packages in the channel, or those matching `NAME` (`posix-env search "lib*"`) |
 | `posix-env update` | updates all packages |
 | `posix-env setup` | adds the default packages and the user's settings (below) |
 | `posix-env help` | lists the commands (also without a command) |

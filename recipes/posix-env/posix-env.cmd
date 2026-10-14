@@ -35,7 +35,7 @@ if "%VERB%"=="-h" goto help
 if "%VERB%"=="--help" goto help
 if "%VERB%"=="/?" goto help
 set "KNOWN="
-for %%v in (run install remove list update setup) do if /i "%VERB%"=="%%v" set "KNOWN=1"
+for %%v in (run install remove list search update setup) do if /i "%VERB%"=="%%v" set "KNOWN=1"
 if not defined KNOWN (
   1>&2 echo posix-env: unknown command "%VERB%"
   1>&2 echo Run "posix-env help" for the commands.
@@ -57,7 +57,7 @@ if /i "%VERB%"=="list" (
   "%MAMBA%" list -p "%POSIX_ENV_HOME%"
   exit /b
 )
-if /i not "%VERB%"=="update" if /i not "%VERB%"=="setup" if not defined ARGS (1>&2 echo usage: posix-env %VERB% NAME...& exit /b 2)
+if /i not "%VERB%"=="update" if /i not "%VERB%"=="setup" if /i not "%VERB%"=="search" if not defined ARGS (1>&2 echo usage: posix-env %VERB% NAME...& exit /b 2)
 
 rem The channel the environment was created from: "  - URL" in .condarc.
 set "CHANNEL="
@@ -65,6 +65,13 @@ if exist "%POSIX_ENV_HOME%\.condarc" for /f "usebackq tokens=1,*" %%a in ("%POSI
 if not defined CHANNEL (
   1>&2 echo posix-env: no channel in %POSIX_ENV_HOME%\.condarc
   exit /b 1
+)
+rem search changes nothing, so micromamba runs in place.  Without a name it
+rem lists every package in the channel.
+if /i "%VERB%"=="search" if not defined ARGS set ARGS="*"
+if /i "%VERB%"=="search" (
+  "%MAMBA%" search -q -c "%CHANNEL%" --override-channels %ARGS%
+  exit /b
 )
 set PACKAGES=posix-env autoconf automake libtool gettext-tools pkgconf ^
   diffutils patch file gzip libarchive xz zstd less
@@ -80,7 +87,7 @@ rem user's settings (Start menu, Windows Terminal, PATH): the installer runs
 rem it, and the user runs it again to restore them.
 if /i "%VERB%"=="setup" (
   echo Setting up the environment in %POSIX_ENV_HOME% ...
-  "%COPY%" install -y -q -p "%POSIX_ENV_HOME%" -c "%CHANNEL%" --override-channels %PACKAGES% && "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "%POSIX_ENV_HOME%\share\posix-env\posix-env-entries.ps1"
+  "%COPY%" install -y --log-level error -p "%POSIX_ENV_HOME%" -c "%CHANNEL%" --override-channels %PACKAGES% >nul && "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "%POSIX_ENV_HOME%\share\posix-env\posix-env-entries.ps1"
   call set "STATUS=%%ERRORLEVEL%%"
   del "%COPY%"
   setlocal EnableDelayedExpansion
@@ -88,21 +95,21 @@ if /i "%VERB%"=="setup" (
 )
 if /i "%VERB%"=="update" (
   echo Updating the environment in %POSIX_ENV_HOME% ...
-  "%COPY%" update --all -y -q -p "%POSIX_ENV_HOME%" -c "%CHANNEL%" --override-channels && echo Restart open POSIX shells to use the updated packages.
+  "%COPY%" update --all -y --log-level error -p "%POSIX_ENV_HOME%" -c "%CHANNEL%" --override-channels >nul && echo Restart open POSIX shells to use the updated packages.
   call set "STATUS=%%ERRORLEVEL%%"
   del "%COPY%"
   setlocal EnableDelayedExpansion
   exit /b !STATUS!
 )
 if /i "%VERB%"=="install" (
-  "%COPY%" install -y -q -p "%POSIX_ENV_HOME%" -c "%CHANNEL%" --override-channels %ARGS%
+  "%COPY%" install -y --log-level error -p "%POSIX_ENV_HOME%" -c "%CHANNEL%" --override-channels %ARGS% >nul
   call set "STATUS=%%ERRORLEVEL%%"
   del "%COPY%"
   setlocal EnableDelayedExpansion
   exit /b !STATUS!
 )
 (
-  "%COPY%" remove -y -q -p "%POSIX_ENV_HOME%" %ARGS%
+  "%COPY%" remove -y --log-level error -p "%POSIX_ENV_HOME%" %ARGS% >nul
   call set "STATUS=%%ERRORLEVEL%%"
   del "%COPY%"
   setlocal EnableDelayedExpansion
@@ -117,6 +124,8 @@ echo   run COMMAND...    run a command in it (posix-env run make -j8)
 echo   install NAME...   add packages (posix-env install dejagnu)
 echo   remove NAME...    remove packages
 echo   list              list the installed packages
+echo   search [NAME]     list the packages in the channel, or those matching
+echo                     NAME (posix-env search "lib*")
 echo   update            update all packages
 echo   setup             add the default packages, the Start menu entry, the
 echo                     Windows Terminal profile and posix-env on PATH
