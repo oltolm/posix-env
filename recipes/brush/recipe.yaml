@@ -43,12 +43,14 @@ source:
       - 0029-feat-windows-resolve-POSIX-bin-paths-through-PATH.patch
       - 0030-feat-windows-report-CPU-time-in-time-and-times.patch
       - 0031-fix-measure-the-real-time-of-time-with-a-monotonic-c.patch
+      - 0032-feat-windows-rm-and-cat-builtins.patch
+      - 0033-fix-windows-reserve-an-8-MiB-main-thread-stack.patch
   - url: https://github.com/reubeno/brush/releases/download/brush-shell-v0.4.0/brush-docs.tar.gz
     sha256: 1070fa3a9470927c0c3d9c5417151f1b8f72317b42bed21f33e5fd4f3dad3332
     target_directory: docs
 
 build:
-  number: 10
+  number: 11
   script:
     interpreter: brush
     file: build.sh
@@ -76,6 +78,10 @@ tests:
         - sh -c "exec /usr/bin/sh -c 'exit 0'" || exit /b 1
         # Children's CPU time is counted (patch 0030).
         - sh -c "\"$BASH\" -c 'i=0; while [ $i -lt 100000 ]; do i=$((i+1)); done'; set -- $(times); test \"$3\" != 0m0.000s" || exit /b 1
+        # rm and cat are builtins; enable -n leaves them to PATH (patch 0032).
+        - sh -c "test \"$(type -t rm cat)\" = \"$(printf 'builtin\nbuiltin')\"" || exit /b 1
+        - sh -c "printf 'here\n' > f && cat f - < f > g && rm -f f missing && test ! -e f && test \"$(cat g)\" = \"$(printf 'here\nhere')\"" || exit /b 1
+        - sh -c "enable -n rm cat; case $(type -t rm cat) in *builtin*) exit 1;; esac" || exit /b 1
 
 about:
   homepage: https://github.com/reubeno/brush

@@ -1,0 +1,509 @@
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Subject: [PATCH] feat(windows): rm and cat builtins
+
+Configure scripts run rm -f and cat over a thousand times; on Windows
+each process start costs about 4 ms, a sixth of gzip's configure.  As
+bash's loadable rm and cat builtins do, the shell now handles them
+itself: rm with -f, -r, -R and --, cat with files, - and --.  Other
+options, operands that cannot be removed or opened, and "", ".", ".."
+and drive operands go to the external program, so its messages and
+exit status apply.  The builtins exist on Windows only; enable -n
+turns them off.
+
+Assisted-by: Claude Code:claude-opus-5-5
+---
+ Cargo.lock                                    |   1 +
+ brush-builtins/Cargo.toml                     |   5 +
+ brush-builtins/src/cat.rs                     |  80 +++++++++++
+ brush-builtins/src/external.rs                |  33 +++++
+ brush-builtins/src/factory.rs                 |   8 ++
+ brush-builtins/src/lib.rs                     |   6 +
+ brush-builtins/src/rm.rs                      | 116 +++++++++++++++
+ brush-builtins/tests/windows_file_builtins.rs | 133 ++++++++++++++++++
+ 8 files changed, 382 insertions(+)
+ create mode 100644 brush-builtins/src/cat.rs
+ create mode 100644 brush-builtins/src/external.rs
+ create mode 100644 brush-builtins/src/rm.rs
+ create mode 100644 brush-builtins/tests/windows_file_builtins.rs
+
+diff --git a/Cargo.lock b/Cargo.lock
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -391,6 +391,7 @@ dependencies = [
+  "procfs",
+  "rlimit",
+  "strum",
++ "tempfile",
+  "thiserror 2.0.20",
+  "tokio",
+  "tracing",
+diff --git a/brush-builtins/Cargo.toml b/brush-builtins/Cargo.toml
+--- a/brush-builtins/Cargo.toml
++++ b/brush-builtins/Cargo.toml
+@@ -21,6 +21,7 @@ default = [
+     'builtin.break',
+     'builtin.builtin',
+     'builtin.caller',
++    'builtin.cat',
+     'builtin.cd',
+     'builtin.colon',
+     'builtin.command',
+@@ -54,6 +55,7 @@ default = [
+     'builtin.pwd',
+     'builtin.read',
+     'builtin.return',
++    'builtin.rm',
+     'builtin.set',
+     'builtin.shift',
+     'builtin.shopt',
+@@ -76,6 +78,7 @@ default = [
+ 'builtin.break' = []
+ 'builtin.builtin' = []
+ 'builtin.caller' = []
++'builtin.cat' = []
+ 'builtin.cd' = []
+ 'builtin.colon' = []
+ 'builtin.command' = []
+@@ -109,6 +112,7 @@ default = [
+ 'builtin.pwd' = []
+ 'builtin.read' = []
+ 'builtin.return' = []
++'builtin.rm' = []
+ 'builtin.set' = []
+ 'builtin.shift' = []
+ 'builtin.shopt' = []
+@@ -175,3 +179,4 @@ procfs = "0.18.0"
+ [dev-dependencies]
+ anyhow = "1.0.102"
+ pretty_assertions = { version = "1.4.1", features = ["unstable"] }
++tempfile = "3.27.0"
+diff --git a/brush-builtins/src/cat.rs b/brush-builtins/src/cat.rs
+new file mode 100644
+--- /dev/null
++++ b/brush-builtins/src/cat.rs
+@@ -0,0 +1,80 @@
++use clap::Parser;
++use std::io::Write;
++
++use brush_core::{ExecutionResult, builtins};
++
++/// Concatenate files to standard output.
++///
++/// Copies the operands itself when no options are given; with options, and
++/// for each operand that cannot be opened, the external cat runs instead.
++#[derive(Parser)]
++#[clap(disable_help_flag = true, disable_version_flag = true)]
++pub(crate) struct CatCommand {
++    /// Operands, as given.
++    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
++    args: Vec<String>,
++}
++
++impl builtins::Command for CatCommand {
++    type Error = brush_core::Error;
++
++    fn new<I>(args: I) -> Result<Self, clap::Error>
++    where
++        I: IntoIterator<Item = String>,
++    {
++        Ok(Self {
++            args: args.into_iter().skip(1).collect(),
++        })
++    }
++
++    async fn execute<SE: brush_core::ShellExtensions>(
++        &self,
++        mut context: brush_core::ExecutionContext<'_, SE>,
++    ) -> Result<ExecutionResult, Self::Error> {
++        let operands = match self.args.iter().position(|a| a == "--") {
++            Some(i) if !has_options(&self.args[..i]) => &self.args[i + 1..],
++            None if !has_options(&self.args) => &self.args[..],
++            _ => return crate::external::run(&mut context, "cat", self.args.iter().cloned()).await,
++        };
++
++        let stdin_operand = ["-".to_owned()];
++        let operands = if operands.is_empty() {
++            &stdin_operand[..]
++        } else {
++            operands
++        };
++
++        let mut out = context.stdout();
++        let mut result = Ok(ExecutionResult::success());
++        for operand in operands {
++            let copied = if operand == "-" {
++                std::io::copy(&mut context.stdin(), &mut out)
++            } else if let Ok(mut file) = std::fs::File::open(context.shell.absolute_path(operand)) {
++                std::io::copy(&mut file, &mut out)
++            } else {
++                // Later operands are still copied, as cat does.
++                let status =
++                    crate::external::run(&mut context, "cat", ["--".to_owned(), operand.clone()])
++                        .await;
++                if !status.as_ref().is_ok_and(ExecutionResult::is_success) {
++                    result = status;
++                }
++                continue;
++            };
++            if let Err(e) = copied.and_then(|_| out.flush()) {
++                // A closed pipe ends cat quietly, as SIGPIPE does on Unix.
++                if e.kind() != std::io::ErrorKind::BrokenPipe {
++                    writeln!(context.stderr(), "cat: {operand}: {e}")?;
++                }
++                return Ok(ExecutionResult::general_error());
++            }
++        }
++        result
++    }
++}
++
++/// Returns true if any argument is an option (anything starting with '-'
++/// except "-" itself, which names standard input).
++fn has_options(args: &[String]) -> bool {
++    args.iter().any(|a| a.starts_with('-') && a.len() > 1)
++}
+diff --git a/brush-builtins/src/external.rs b/brush-builtins/src/external.rs
+new file mode 100644
+--- /dev/null
++++ b/brush-builtins/src/external.rs
+@@ -0,0 +1,33 @@
++//! Hands a command to the external program of the same name, bypassing the
++//! builtin.  Used by the file utility builtins for every case they do not
++//! handle themselves, so the external program's options, messages and exit
++//! status apply unchanged.
++
++use brush_core::{ExecutionResult, commands};
++
++/// Runs the program `name` found in PATH with `args` (without `argv[0]`),
++/// using the builtin's redirections.
++pub(crate) async fn run<SE: brush_core::ShellExtensions>(
++    context: &mut brush_core::ExecutionContext<'_, SE>,
++    name: &str,
++    args: impl IntoIterator<Item = String>,
++) -> Result<ExecutionResult, brush_core::Error> {
++    let Some(path) = context.shell.resolve_command_in_path_using_cache(name) else {
++        return Err(brush_core::ErrorKind::CommandNotFound(name.to_owned()).into());
++    };
++
++    // A command name with a path separator is never looked up as a builtin.
++    let path = path.to_string_lossy().into_owned();
++    let mut cmd = commands::SimpleCommand::new(
++        commands::ShellForCommand::ParentShell(context.shell),
++        context.params.clone(),
++        path.clone(),
++        std::iter::once(path)
++            .chain(args)
++            .map(brush_core::CommandArg::String),
++    );
++    cmd.argv0 = Some(name.to_owned());
++    cmd.use_functions = false;
++
++    Ok(cmd.execute().await?.wait().await?.into())
++}
+diff --git a/brush-builtins/src/factory.rs b/brush-builtins/src/factory.rs
+--- a/brush-builtins/src/factory.rs
++++ b/brush-builtins/src/factory.rs
+@@ -140,6 +140,14 @@ pub fn default_builtins<SE: brush_core::ShellExtensions>(
+     #[cfg(feature = "builtin.wait")]
+     m.insert("wait".into(), builtin::<wait::WaitCommand, SE>());
+ 
++    // Utilities that configure scripts run over a thousand times; starting a
++    // process takes milliseconds on Windows.  As with bash's loadable cat and
++    // rm builtins, `enable -n` turns them off.
++    #[cfg(all(feature = "builtin.cat", windows))]
++    m.insert("cat".into(), builtin::<cat::CatCommand, SE>());
++    #[cfg(all(feature = "builtin.rm", windows))]
++    m.insert("rm".into(), builtin::<rm::RmCommand, SE>());
++
+     #[cfg(feature = "builtin.fc")]
+     m.insert("fc".into(), builtin::<fc::FcCommand, SE>());
+ 
+diff --git a/brush-builtins/src/lib.rs b/brush-builtins/src/lib.rs
+--- a/brush-builtins/src/lib.rs
++++ b/brush-builtins/src/lib.rs
+@@ -21,6 +21,8 @@ mod break_;
+ mod builtin_;
+ #[cfg(feature = "builtin.caller")]
+ mod caller;
++#[cfg(all(feature = "builtin.cat", windows))]
++mod cat;
+ #[cfg(feature = "builtin.cd")]
+ mod cd;
+ #[cfg(feature = "builtin.colon")]
+@@ -53,6 +55,8 @@ mod exec;
+ mod exit;
+ #[cfg(feature = "builtin.export")]
+ mod export;
++#[cfg(all(any(feature = "builtin.cat", feature = "builtin.rm"), windows))]
++mod external;
+ #[cfg(feature = "builtin.false")]
+ mod false_;
+ #[cfg(feature = "builtin.fc")]
+@@ -87,6 +91,8 @@ mod pwd;
+ mod read;
+ #[cfg(feature = "builtin.return")]
+ mod return_;
++#[cfg(all(feature = "builtin.rm", windows))]
++mod rm;
+ #[cfg(feature = "builtin.set")]
+ mod set;
+ #[cfg(feature = "builtin.shift")]
+diff --git a/brush-builtins/src/rm.rs b/brush-builtins/src/rm.rs
+new file mode 100644
+--- /dev/null
++++ b/brush-builtins/src/rm.rs
+@@ -0,0 +1,116 @@
++use clap::Parser;
++use std::path::Path;
++
++use brush_core::{ExecutionResult, builtins};
++
++/// Remove files or directories.
++///
++/// Removes the operands itself when the options are only -f, -r or -R and
++/// removal succeeds; anything else (other options, operands that cannot be
++/// removed, error messages) is left to the external rm.
++#[derive(Parser)]
++#[clap(disable_help_flag = true, disable_version_flag = true)]
++pub(crate) struct RmCommand {
++    /// Options and operands, as given.
++    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
++    args: Vec<String>,
++}
++
++impl builtins::Command for RmCommand {
++    type Error = brush_core::Error;
++
++    fn new<I>(args: I) -> Result<Self, clap::Error>
++    where
++        I: IntoIterator<Item = String>,
++    {
++        Ok(Self {
++            args: args.into_iter().skip(1).collect(),
++        })
++    }
++
++    async fn execute<SE: brush_core::ShellExtensions>(
++        &self,
++        mut context: brush_core::ExecutionContext<'_, SE>,
++    ) -> Result<ExecutionResult, Self::Error> {
++        let Some((options, operands)) = split_options(&self.args) else {
++            return crate::external::run(&mut context, "rm", self.args.iter().cloned()).await;
++        };
++        let force = options.contains('f');
++        let recursive = options.contains('r') || options.contains('R');
++
++        let failed: Vec<&String> = operands
++            .iter()
++            .filter(|operand| {
++                !remove(
++                    &context.shell.absolute_path(operand),
++                    operand,
++                    force,
++                    recursive,
++                )
++            })
++            .collect();
++        if failed.is_empty() {
++            return Ok(ExecutionResult::success());
++        }
++
++        let mut args = Vec::with_capacity(failed.len() + 2);
++        if !options.is_empty() {
++            args.push(format!("-{options}"));
++        }
++        args.push("--".to_owned());
++        args.extend(failed.into_iter().cloned());
++        crate::external::run(&mut context, "rm", args).await
++    }
++}
++
++/// Splits the arguments into the option letters and the operands, or returns
++/// `None` if they use anything but -f, -r, -R and `--` before the operands.
++fn split_options(args: &[String]) -> Option<(String, &[String])> {
++    let mut options = String::new();
++    for (i, arg) in args.iter().enumerate() {
++        if arg == "--" {
++            return Some((options, &args[i + 1..]));
++        }
++        match arg.strip_prefix('-') {
++            Some(letters) if !letters.is_empty() => {
++                if !letters.chars().all(|c| matches!(c, 'f' | 'r' | 'R')) {
++                    return None;
++                }
++                options.push_str(letters);
++            }
++            _ => {
++                let operands = &args[i..];
++                // GNU rm also takes options after operands.
++                if operands.iter().any(|a| a.starts_with('-') && a.len() > 1) {
++                    return None;
++                }
++                return Some((options, operands));
++            }
++        }
++    }
++    Some((options, &[]))
++}
++
++/// Removes `path`, returning false if the external rm must handle it.
++fn remove(path: &Path, operand: &str, force: bool, recursive: bool) -> bool {
++    // rm refuses "", "." and ".." as the last component; let it say so.  Path
++    // drops a trailing "." (Path::new("d/.").file_name() is "d"), so look at
++    // the operand as given.  "C:" names the current directory of drive C.
++    let last = operand
++        .trim_end_matches(['/', '\\'])
++        .rsplit(['/', '\\'])
++        .next()
++        .unwrap_or_default();
++    if matches!(last, "" | "." | "..") || last.ends_with(':') {
++        return false;
++    }
++    match std::fs::symlink_metadata(path) {
++        Err(e) => force && e.kind() == std::io::ErrorKind::NotFound,
++        Ok(m) if m.is_dir() => recursive && std::fs::remove_dir_all(path).is_ok(),
++        // A symbolic link to a directory is removed as a directory on Windows.
++        Ok(m) if m.is_symlink() => {
++            std::fs::remove_file(path).is_ok() || std::fs::remove_dir(path).is_ok()
++        }
++        Ok(_) => std::fs::remove_file(path).is_ok(),
++    }
++}
+diff --git a/brush-builtins/tests/windows_file_builtins.rs b/brush-builtins/tests/windows_file_builtins.rs
+new file mode 100644
+--- /dev/null
++++ b/brush-builtins/tests/windows_file_builtins.rs
+@@ -0,0 +1,133 @@
++//! Tests for the `rm` and `cat` builtins.  On Windows every process start
++//! costs milliseconds, and configure scripts run `rm -f` and `cat` over a
++//! thousand times; the builtins do the common forms in the shell and leave
++//! everything else to the external utility.
++
++#![cfg(windows)]
++#![cfg(test)]
++#![allow(clippy::panic_in_result_fn, clippy::expect_used)]
++
++use anyhow::Result;
++use brush_builtins::{BuiltinSet, default_builtins};
++
++/// Runs `script` in a new shell whose working directory is `dir`.
++async fn run(dir: &std::path::Path, script: &str) -> Result<()> {
++    let mut shell = brush_core::Shell::builder()
++        .builtins(default_builtins(BuiltinSet::BashMode))
++        .build()
++        .await?;
++    let params = shell.default_exec_params();
++    let script = format!("cd '{}' || exit 1\n{script}", dir.display());
++    shell
++        .run_string(script, &brush_core::SourceInfo::default(), &params)
++        .await?;
++    Ok(())
++}
++
++fn read(dir: &std::path::Path, name: &str) -> String {
++    std::fs::read_to_string(dir.join(name)).expect("output file")
++}
++
++#[tokio::test]
++async fn rm_and_cat_are_builtins() -> Result<()> {
++    let dir = tempfile::tempdir()?;
++    run(dir.path(), "type -t rm cat > out").await?;
++    assert_eq!(read(dir.path(), "out"), "builtin\nbuiltin\n");
++    Ok(())
++}
++
++#[tokio::test]
++async fn rm_removes_files_and_trees() -> Result<()> {
++    let dir = tempfile::tempdir()?;
++    std::fs::create_dir_all(dir.path().join("d/e"))?;
++    std::fs::create_dir(dir.path().join("sub"))?;
++    for file in ["d/e/f", "a", "b", "sub/c"] {
++        std::fs::write(dir.path().join(file), b"")?;
++    }
++    run(
++        dir.path(),
++        "rm -f a b missing; echo \"f $?\" > out
++         rm -rf d missing; echo \"rf $?\" >> out
++         cd sub && rm c && cd ..; echo \"rel $?\" >> out
++         rm -f; echo \"none $?\" >> out
++         rm -f -- -x; echo \"dashdash $?\" >> out",
++    )
++    .await?;
++    assert_eq!(
++        read(dir.path(), "out"),
++        "f 0\nrf 0\nrel 0\nnone 0\ndashdash 0\n"
++    );
++    for gone in ["a", "b", "d", "sub/c"] {
++        assert!(!dir.path().join(gone).exists(), "{gone} still exists");
++    }
++    Ok(())
++}
++
++/// Unsupported options and failing operands go to the external `rm`; with
++/// no `rm` in PATH that is "command not found".
++#[tokio::test]
++async fn rm_leaves_the_rest_to_the_external_utility() -> Result<()> {
++    let dir = tempfile::tempdir()?;
++    std::fs::create_dir(dir.path().join("d"))?;
++    std::fs::write(dir.path().join("a"), b"")?;
++    run(
++        dir.path(),
++        "PATH=
++         rm -i a; echo \"option $?\" > out
++         rm missing; echo \"missing $?\" >> out
++         rm d; echo \"directory $?\" >> out
++         rm -rf . ./. d/.. ''; echo \"dot $?\" >> out",
++    )
++    .await?;
++    assert_eq!(
++        read(dir.path(), "out"),
++        "option 127\nmissing 127\ndirectory 127\ndot 127\n"
++    );
++    assert!(dir.path().join("a").exists());
++    assert!(dir.path().join("d").exists());
++    Ok(())
++}
++
++#[tokio::test]
++async fn cat_copies_files_and_stdin() -> Result<()> {
++    let dir = tempfile::tempdir()?;
++    std::fs::write(dir.path().join("a"), b"one\r\n\0two")?;
++    std::fs::create_dir(dir.path().join("sub"))?;
++    std::fs::write(dir.path().join("sub/b"), b"three\n")?;
++    run(
++        dir.path(),
++        "cat <<EOF > heredoc
++x $((1 + 1))
++EOF
++         echo middle | cat a - sub/b > joined
++         cd sub && cat ../a > ../rel && cd ..
++         cat -- a | cat > piped",
++    )
++    .await?;
++    assert_eq!(read(dir.path(), "heredoc"), "x 2\n");
++    assert_eq!(
++        std::fs::read(dir.path().join("joined"))?,
++        b"one\r\n\0twomiddle\nthree\n"
++    );
++    assert_eq!(std::fs::read(dir.path().join("rel"))?, b"one\r\n\0two");
++    assert_eq!(std::fs::read(dir.path().join("piped"))?, b"one\r\n\0two");
++    Ok(())
++}
++
++#[tokio::test]
++async fn cat_leaves_the_rest_to_the_external_utility() -> Result<()> {
++    let dir = tempfile::tempdir()?;
++    std::fs::write(dir.path().join("a"), b"a\n")?;
++    run(
++        dir.path(),
++        "PATH=
++         cat -n a > numbered; echo \"option $?\" > out
++         cat a missing a > partial; echo \"missing $?\" >> out",
++    )
++    .await?;
++    assert_eq!(read(dir.path(), "out"), "option 127\nmissing 127\n");
++    assert_eq!(read(dir.path(), "numbered"), "");
++    // Operands before and after the failing one are still copied.
++    assert_eq!(read(dir.path(), "partial"), "a\na\n");
++    Ok(())
++}

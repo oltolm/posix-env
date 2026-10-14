@@ -1,0 +1,55 @@
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Subject: [PATCH] fix(windows): reserve an 8 MiB main-thread stack
+
+Arithmetic follows variable references up to 1024 levels, as bash does.
+In a debug build those levels need more than the 2 MiB stack that GNU ld
+reserves for a Windows executable (link.exe reserves 1 MiB), so a cycle
+such as a=b b=a overflowed the stack instead of reporting "expression
+recursion level exceeded".  Reserve the 8 MiB that Linux gives the main
+thread by default.
+
+Assisted-by: Claude Code:claude-opus-5-5
+---
+ brush-shell/build.rs                     | 13 +++++++++++++
+ brush-shell/tests/cases/brush/stack.yaml | 14 ++++++++++++++
+ 2 files changed, 27 insertions(+)
+ create mode 100644 brush-shell/build.rs
+ create mode 100644 brush-shell/tests/cases/brush/stack.yaml
+
+diff --git a/brush-shell/build.rs b/brush-shell/build.rs
+new file mode 100644
+--- /dev/null
++++ b/brush-shell/build.rs
+@@ -0,0 +1,13 @@
++//! Reserves the 8 MiB main-thread stack that Linux gives by default; Windows
++//! executables get 2 MiB from GNU ld and 1 MiB from link.exe.
++
++fn main() {
++    println!("cargo:rerun-if-changed=build.rs");
++    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
++        match std::env::var("CARGO_CFG_TARGET_ENV").as_deref() {
++            Ok("gnu") => println!("cargo:rustc-link-arg-bins=-Wl,--stack,8388608"),
++            Ok("msvc") => println!("cargo:rustc-link-arg-bins=/STACK:8388608"),
++            _ => {}
++        }
++    }
++}
+diff --git a/brush-shell/tests/cases/brush/stack.yaml b/brush-shell/tests/cases/brush/stack.yaml
+new file mode 100644
+--- /dev/null
++++ b/brush-shell/tests/cases/brush/stack.yaml
+@@ -0,0 +1,14 @@
++name: "main thread stack"
++cases:
++  # Arithmetic follows variable references up to 1024 levels, as bash does.
++  # In a debug build those levels need more than the 2 MiB main-thread stack
++  # that Windows executables get by default; Linux gives 8 MiB.
++  - name: "arithmetic recursion limit is reached before the stack ends"
++    ignore_stderr: true
++    stdin: |
++      a=b
++      b=a
++      echo "$(( a ))"
++      echo "exit: $?"
++    expected_stdout: |
++      exit: 1
