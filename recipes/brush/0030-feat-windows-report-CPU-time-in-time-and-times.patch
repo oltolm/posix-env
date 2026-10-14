@@ -1,0 +1,241 @@
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Subject: [PATCH] feat(windows): report CPU time in time and times
+
+On Windows the time keyword and the times builtin always reported zero
+user and system time: the resource functions were stubs.  Take the
+shell's own time from GetProcessTimes.  Windows has no RUSAGE_CHILDREN,
+so before it starts its first child, the shell joins a new job object.
+The job accounts for every process started from then on, grandchildren
+and exited processes included; the shell's own time since joining is
+subtracted.  Children may still break away from the job.
+
+Assisted-by: Claude Code:claude-opus-5-5
+---
+ Cargo.lock                             |   1 +
+ brush-core/Cargo.toml                  |   6 +
+ brush-core/src/sys/tokio_process.rs    |   2 +
+ brush-core/src/sys/windows.rs          |   2 +-
+ brush-core/src/sys/windows/resource.rs | 164 +++++++++++++++++++++++++
+ 5 files changed, 174 insertions(+), 1 deletion(-)
+ create mode 100644 brush-core/src/sys/windows/resource.rs
+
+diff --git a/Cargo.lock b/Cargo.lock
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -438,6 +438,7 @@ dependencies = [
+  "uzers",
+  "whoami",
+  "winapi-util",
++ "windows-sys 0.61.2",
+ ]
+ 
+ [[package]]
+diff --git a/brush-core/Cargo.toml b/brush-core/Cargo.toml
+--- a/brush-core/Cargo.toml
++++ b/brush-core/Cargo.toml
+@@ -64,6 +64,12 @@ tokio = { version = "1.52.3", features = [
+ check_elevation = "0.2.7"
+ whoami = "2.1.1"
+ winapi-util = "0.1.11"
++windows-sys = { version = "0.61.2", features = [
++    "Win32_Foundation",
++    "Win32_Security",
++    "Win32_System_JobObjects",
++    "Win32_System_Threading",
++] }
+ 
+ [target.'cfg(unix)'.dependencies]
+ command-fds = "0.3.2"
+diff --git a/brush-core/src/sys/tokio_process.rs b/brush-core/src/sys/tokio_process.rs
+--- a/brush-core/src/sys/tokio_process.rs
++++ b/brush-core/src/sys/tokio_process.rs
+@@ -5,6 +5,8 @@ pub(crate) use tokio::process::Child;
+ 
+ // `kill_on_drop`: see `CreateOptions::kill_external_commands_on_drop` (false for ordinary shells).
+ pub(crate) fn spawn(command: std::process::Command, kill_on_drop: bool) -> std::io::Result<Child> {
++    #[cfg(windows)]
++    crate::sys::resource::join_job();
+     let mut command = tokio::process::Command::from(command);
+     command.kill_on_drop(kill_on_drop);
+     command.spawn()
+diff --git a/brush-core/src/sys/windows.rs b/brush-core/src/sys/windows.rs
+--- a/brush-core/src/sys/windows.rs
++++ b/brush-core/src/sys/windows.rs
+@@ -6,7 +6,7 @@ pub(crate) mod fs;
+ pub use crate::sys::stubs::input;
+ pub(crate) mod network;
+ pub use crate::sys::stubs::poll;
+-pub use crate::sys::stubs::resource;
++pub mod resource;
+ 
+ /// Signal processing utilities
+ pub mod signal {
+diff --git a/brush-core/src/sys/windows/resource.rs b/brush-core/src/sys/windows/resource.rs
+new file mode 100644
+--- /dev/null
++++ b/brush-core/src/sys/windows/resource.rs
+@@ -0,0 +1,164 @@
++//! Resource utilities
++
++use crate::error;
++use std::sync::OnceLock;
++use std::time::Duration;
++use windows_sys::Win32::Foundation::{CloseHandle, FILETIME, HANDLE};
++use windows_sys::Win32::System::JobObjects::{
++    AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_BREAKAWAY_OK,
++    JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, JOBOBJECT_BASIC_LIMIT_INFORMATION,
++    JobObjectBasicAccountingInformation, JobObjectBasicLimitInformation, QueryInformationJobObject,
++    SetInformationJobObject,
++};
++use windows_sys::Win32::System::Threading::{GetCurrentProcess, GetProcessTimes};
++
++/// A job object containing this process and every process it starts afterwards.
++struct Job {
++    /// The job handle; stored as an integer so that it can be shared between threads.
++    handle: usize,
++    /// The user and system time of this process when it joined the job.
++    self_times: (Duration, Duration),
++}
++
++/// The job, created on first use; `None` if it could not be set up.
++static JOB: OnceLock<Option<Job>> = OnceLock::new();
++
++/// Returns the user and system CPU time used by the current process;
++/// expressed as a tuple containing user time and system time, in that order.
++pub fn get_self_user_and_system_time() -> Result<(Duration, Duration), error::Error> {
++    let mut creation = FILETIME::default();
++    let mut exit = FILETIME::default();
++    let mut kernel = FILETIME::default();
++    let mut user = FILETIME::default();
++    // SAFETY: Returns a pseudo handle; there are no preconditions.
++    let process = unsafe { GetCurrentProcess() };
++    // SAFETY: The pseudo handle is always valid and all pointers refer to live locals.
++    let ok = unsafe {
++        GetProcessTimes(
++            process,
++            &raw mut creation,
++            &raw mut exit,
++            &raw mut kernel,
++            &raw mut user,
++        )
++    };
++    if ok == 0 {
++        return Err(std::io::Error::last_os_error().into());
++    }
++    Ok((filetime_to_duration(user), filetime_to_duration(kernel)))
++}
++
++/// Returns the user and system CPU time used by child processes; expressed
++/// as a tuple containing user time and system time, in that order.
++///
++/// Windows has no equivalent of `RUSAGE_CHILDREN`, so this process joins a new
++/// job object before it starts its first child (see [`join_job`]).  The job
++/// accounts for all processes started from then on, including grandchildren and
++/// processes that have exited; the time of this process itself is subtracted.
++pub fn get_children_user_and_system_time() -> Result<(Duration, Duration), error::Error> {
++    let Some(job) = JOB.get_or_init(create_job) else {
++        return Ok((Duration::ZERO, Duration::ZERO));
++    };
++
++    let mut info = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION::default();
++    // SAFETY: The handle stays open for the life of the process and `info` is
++    // a live local of the size passed.
++    let ok = unsafe {
++        QueryInformationJobObject(
++            job.handle as HANDLE,
++            JobObjectBasicAccountingInformation,
++            (&raw mut info).cast(),
++            size_of_u32(&info),
++            std::ptr::null_mut(),
++        )
++    };
++    if ok == 0 {
++        return Err(std::io::Error::last_os_error().into());
++    }
++
++    let (self_user, self_system) = get_self_user_and_system_time()?;
++    let user = ticks_to_duration(info.TotalUserTime)
++        .saturating_sub(self_user.saturating_sub(job.self_times.0));
++    let system = ticks_to_duration(info.TotalKernelTime)
++        .saturating_sub(self_system.saturating_sub(job.self_times.1));
++    Ok((user, system))
++}
++
++/// Joins the job that accounts for child processes, unless this process already
++/// has.  Called before a child is started, so that the child is counted.
++pub(crate) fn join_job() {
++    JOB.get_or_init(create_job);
++}
++
++/// Creates a job object and moves this process into it.
++fn create_job() -> Option<Job> {
++    let self_times = get_self_user_and_system_time().ok()?;
++
++    // SAFETY: Null attributes and name are allowed.
++    let handle = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
++    if handle.is_null() {
++        tracing::debug!(
++            "CreateJobObjectW failed: {}",
++            std::io::Error::last_os_error()
++        );
++        return None;
++    }
++
++    // Children may still break away, as they could before.
++    let limits = JOBOBJECT_BASIC_LIMIT_INFORMATION {
++        LimitFlags: JOB_OBJECT_LIMIT_BREAKAWAY_OK,
++        ..Default::default()
++    };
++    // SAFETY: `handle` is a valid job and `limits` is a live local of the size passed.
++    let ok = unsafe {
++        SetInformationJobObject(
++            handle,
++            JobObjectBasicLimitInformation,
++            (&raw const limits).cast(),
++            size_of_u32(&limits),
++        )
++    };
++    if ok == 0 {
++        tracing::debug!(
++            "SetInformationJobObject failed: {}",
++            std::io::Error::last_os_error()
++        );
++    }
++
++    // SAFETY: Returns a pseudo handle; there are no preconditions.
++    let process = unsafe { GetCurrentProcess() };
++    // SAFETY: `handle` is a valid job and the pseudo handle is always valid.
++    let ok = unsafe { AssignProcessToJobObject(handle, process) };
++    if ok == 0 {
++        tracing::debug!(
++            "AssignProcessToJobObject failed: {}",
++            std::io::Error::last_os_error()
++        );
++        // SAFETY: `handle` is a valid job that nothing else refers to.
++        unsafe { CloseHandle(handle) };
++        return None;
++    }
++
++    Some(Job {
++        handle: handle as usize,
++        self_times,
++    })
++}
++
++/// Returns the size of a Win32 structure as the `u32` that the API expects.
++#[allow(clippy::cast_possible_truncation)]
++const fn size_of_u32<T>(_: &T) -> u32 {
++    size_of::<T>() as u32
++}
++
++/// Converts a `FILETIME` holding a duration to a [`Duration`].
++fn filetime_to_duration(time: FILETIME) -> Duration {
++    let ticks = (u64::from(time.dwHighDateTime) << 32) | u64::from(time.dwLowDateTime);
++    Duration::from_nanos(ticks.saturating_mul(100))
++}
++
++/// Converts a count of 100-nanosecond intervals to a [`Duration`].
++fn ticks_to_duration(ticks: i64) -> Duration {
++    #[allow(clippy::cast_sign_loss)]
++    Duration::from_nanos((ticks.max(0) as u64).saturating_mul(100))
++}

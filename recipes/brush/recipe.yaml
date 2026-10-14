@@ -41,12 +41,14 @@ source:
       - 0027-fix-windows-libtool-wrappers-follow-symbolic-links-t.patch
       - 0028-fix-windows-run-ENOEXEC-files-as-shell-scripts.patch
       - 0029-feat-windows-resolve-POSIX-bin-paths-through-PATH.patch
+      - 0030-feat-windows-report-CPU-time-in-time-and-times.patch
+      - 0031-fix-measure-the-real-time-of-time-with-a-monotonic-c.patch
   - url: https://github.com/reubeno/brush/releases/download/brush-shell-v0.4.0/brush-docs.tar.gz
     sha256: 1070fa3a9470927c0c3d9c5417151f1b8f72317b42bed21f33e5fd4f3dad3332
     target_directory: docs
 
 build:
-  number: 9
+  number: 10
   script:
     interpreter: brush
     file: build.sh
@@ -72,6 +74,8 @@ tests:
         - sh -c "./no-shebang" | findstr /x fallback-ok || exit /b 1
         - sh -c "exec /bin/sh -c 'exit 0'" || exit /b 1
         - sh -c "exec /usr/bin/sh -c 'exit 0'" || exit /b 1
+        # Children's CPU time is counted (patch 0030).
+        - sh -c "\"$BASH\" -c 'i=0; while [ $i -lt 100000 ]; do i=$((i+1)); done'; set -- $(times); test \"$3\" != 0m0.000s" || exit /b 1
 
 about:
   homepage: https://github.com/reubeno/brush
