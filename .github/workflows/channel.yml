@@ -1,0 +1,93 @@
+name: Deploy package channel
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing GitHub Release tag to deploy
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
+    steps:
+      - name: Download channel indexes
+        run: |
+          mkdir -p site/channel/win-64 site/channel/noarch downloaded
+          gh release download "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern repodata-win-64.json \
+            --pattern repodata-noarch.json \
+            --dir downloaded
+          mv downloaded/repodata-win-64.json site/channel/win-64/repodata.json
+          mv downloaded/repodata-noarch.json site/channel/noarch/repodata.json
+
+      - name: Validate channel indexes
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          expected = (
+              f"https://github.com/{os.environ['GITHUB_REPOSITORY']}"
+              f"/releases/download/{os.environ['RELEASE_TAG']}"
+          )
+          for subdir in ('win-64', 'noarch'):
+              path = Path('site/channel') / subdir / 'repodata.json'
+              with path.open(encoding='utf-8') as stream:
+                  data = json.load(stream)
+              if data.get('info', {}).get('subdir') != subdir:
+                  raise SystemExit(f'{path}: wrong or missing subdir')
+              if data.get('info', {}).get('base_url') != expected:
+                  raise SystemExit(f'{path}: wrong or missing base_url')
+          PY
+
+      - name: Create channel landing page
+        run: |
+          python - <<'PY'
+          import html
+          import os
+          from pathlib import Path
+
+          tag = html.escape(os.environ['RELEASE_TAG'])
+          repository = html.escape(os.environ['GITHUB_REPOSITORY'])
+          Path('site/index.html').write_text(f'''<!doctype html>
+          <meta charset="utf-8">
+          <title>posix-env package channel</title>
+          <h1>posix-env package channel</h1>
+          <p>Current release: <a href="https://github.com/{repository}/releases/tag/{tag}">{tag}</a></p>
+          <p>Channel URL: <code>https://oltolm.github.io/posix-env/channel</code></p>
+          <p><a href="https://github.com/{repository}">Source, recipes and patches</a></p>
+          ''', encoding='utf-8')
+          PY
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload GitHub Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -117,6 +117,24 @@ Recipe conventions:
 - `#!` scripts that must be started by Windows programs get a copy of
   `scriptexe.exe` as `NAME.exe` next to them (`zgrep`, `xzgrep`, `autopoint`).
 
+## Publishing a release
+
+Tag the commit containing the recipes and patches used for the release, push
+the tag, then publish the already-built local channel:
+
+```
+git tag v0.1.0
+git push origin v0.1.0
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\release.ps1 -Tag v0.1.0
+```
+
+The script validates the tag, stages the `.conda` packages, installer,
+channel indexes and `SHA256SUMS`, and creates a draft GitHub Release. Publishing
+the draft runs `channel.yml`, which deploys `repodata.json` for `win-64` and
+`noarch` to `https://oltolm.github.io/posix-env/channel`; package downloads
+come from the immutable Release assets. Use `-PrepareOnly` to validate and
+stage locally, or `-Publish` to create a published release immediately.
+
 ## Conventions of the environment
 
 1. **Paths** are native Windows paths written with `/`: `C:/Users/me/posix-env/lib`.
