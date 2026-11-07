@@ -95,6 +95,13 @@ jobs:
             mingw-w64-ucrt-x86_64-cmake
             mingw-w64-ucrt-x86_64-ninja
 
+      - name: Locate external toolchain
+        shell: powershell
+        run: |
+          $compiler = (Get-Command gcc.exe -ErrorAction Stop).Source
+          "POSIX_ENV_TOOLCHAIN=$(Split-Path $compiler)" >> $env:GITHUB_ENV
+          & $compiler --version
+
       - name: Download pinned build tools
         shell: powershell
         run: tools\fetch.ps1
