@@ -1,12 +1,11 @@
 @echo off
-rem Builds recipes into the local channel C:\src\posix-env\output.
+rem Builds recipes into the checkout's local output\ channel.
 rem   build RECIPE [RECIPE...] [-- rattler-build options]
 rem
 rem Only the local channel is used: rattler-build adds conda-forge when no
 rem channel is given.  The toolchain is external; POSIX_ENV_TOOLCHAIN names
 rem its bin directory.  rattler-build itself needs git for git sources;
 rem POSIX_ENV_GIT names a directory with git.exe and nothing else of note.
-rem Run tools\prefill.ps1 first to take sources from local copies.
 rem
 rem A package already in output\ is not built again: rattler-build keeps a
 rem file's repodata.json entry when the file is replaced, so a rebuild under

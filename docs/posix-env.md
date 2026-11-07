@@ -13,6 +13,20 @@ rattler-build and installed with micromamba. Only the local channel in
 
 ## Using it
 
+To install from a published channel, download `install.ps1` and run it with
+the channel's HTTPS URL:
+
+```
+powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 -Channel https://OWNER.github.io/posix-env/channel
+```
+
+The installer downloads the pinned micromamba release, checks its SHA-256,
+creates `%USERPROFILE%\posix-env`, records the channel and runs `posix-env
+setup`. `-InstallDir DIR` chooses another directory. `-NoUserIntegration`
+installs the default packages without adding the user PATH, Start menu or
+Windows Terminal entries. The concrete channel URL will replace the example
+when the public channel is deployed.
+
 The launcher is `posix-env.cmd` at the top of the environment
 (`%USERPROFILE%\posix-env\posix-env.cmd`), installed by the posix-env
 package; it takes a command:
@@ -73,15 +87,11 @@ toolchain works; MSYS2's UCRT64 one is the default.
 
 ```
 powershell -ExecutionPolicy Bypass -File tools\fetch.ps1
-powershell -ExecutionPolicy Bypass -File tools\prefill.ps1 [RECIPE...]
 build RECIPE [RECIPE...] [-- rattler-build options]
 ```
 
 - `tools\fetch.ps1` downloads the pinned `rattler-build.exe` and
   `micromamba.exe` into `tools\` and checks their SHA-256 sums.
-- `tools\prefill.ps1` (optional) fills rattler-build's source cache
-  (`output\src_cache`) from local archives and git repositories, so that
-  sources already on the machine are not downloaded again.
 - `build.cmd` builds recipes from `recipes\` into `output\` with only the
   local channel. `PATH` holds System32, the toolchain (`POSIX_ENV_TOOLCHAIN`)
   and git (`POSIX_ENV_GIT`, default `%ProgramFiles%\Git\cmd`); everything

@@ -5,3 +5,5 @@
 /.envs/
 # Downloaded by tools/fetch.ps1.
 /tools/*.exe
+# Local editor settings.
+/.vscode/

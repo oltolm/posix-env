@@ -1,6 +1,6 @@
 # A snapshot of brush's development branch: the Windows fixes need code
 # from after the 0.4.0 release.  Patches 0001-0018 are the ones of MSYS2's
-# mingw-w64-brush; all come from C:\src\brush, branch windows-native.
+# mingw-w64-brush patch series.
 context:
   commit: 8b539ddbb0b265d2703d841b48933d6de601cfc2
 

@@ -29,8 +29,6 @@ in a local channel only; no package from any conda channel. The toolchain
 - [x] rattler-build runs `build.sh` with `interpreter: brush` from the build env.
 - [x] Bootstrap package `posix-env 0.0.0 bootstrap`, seeded from the MSYS2-installed tools.
 - [x] Activation script: forward-slash paths, `CONFIG_SHELL`, `CONFIG_SITE`, `PATH_SEPARATOR`, `PERL5SHELL`.
-- [x] `tools\prefill.ps1` fills rattler-build's source cache from `C:\src\source-packages`, `C:\src\MINGW-packages` and the git repos in `C:\src`.
-- [x] `tools\prefill.ps1` also extracts archives into `<key>_extracted` (rattler-build otherwise copies the archive itself into the work directory).
 - [x] Release sources only, no git snapshots (brush excepted until a newer release; see below).
 - [x] uutils-coreutils 0.12.0: one `coreutils.exe` plus `share\uutils-coreutils\utilities.txt`; post-link `.bat` hard-links each name, pre-unlink `.bat` deletes them. Add `--features openssl` once openssl is packaged (it only speeds up md5/sha digests).
 - [x] scriptexe 0.1.0 (`libexec\posix-env\scriptexe.exe`).
