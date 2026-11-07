@@ -54,7 +54,7 @@ goto args
 if /i "%VERB%"=="run" goto run
 set "MAMBA=%POSIX_ENV_HOME%\libexec\posix-env\micromamba.exe"
 if /i "%VERB%"=="list" (
-  "%MAMBA%" list -p "%POSIX_ENV_HOME%"
+  "%MAMBA%" --no-rc list -p "%POSIX_ENV_HOME%"
   exit /b
 )
 if /i not "%VERB%"=="update" if /i not "%VERB%"=="setup" if /i not "%VERB%"=="search" if not defined ARGS (1>&2 echo usage: posix-env %VERB% NAME...& exit /b 2)
@@ -70,7 +70,7 @@ rem search changes nothing, so micromamba runs in place.  Without a name it
 rem lists every package in the channel.
 if /i "%VERB%"=="search" if not defined ARGS set ARGS="*"
 if /i "%VERB%"=="search" (
-  "%MAMBA%" search -q -c "%CHANNEL%" --override-channels %ARGS%
+  "%MAMBA%" --no-rc search -q -c "%CHANNEL%" --override-channels %ARGS%
   exit /b
 )
 set PACKAGES=posix-env autoconf automake libtool gettext-tools pkgconf ^
@@ -87,29 +87,36 @@ rem user's settings (Start menu, Windows Terminal, PATH): the installer runs
 rem it, and the user runs it again to restore them.
 if /i "%VERB%"=="setup" (
   echo Setting up the environment in %POSIX_ENV_HOME% ...
-  "%COPY%" install -y --log-level error -p "%POSIX_ENV_HOME%" -c "%CHANNEL%" --override-channels %PACKAGES% >nul && "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "%POSIX_ENV_HOME%\share\posix-env\posix-env-entries.ps1"
-  call set "STATUS=%%ERRORLEVEL%%"
+  "%COPY%" --no-rc install -y -q --log-level error -p "%POSIX_ENV_HOME%" -c "%CHANNEL%" --override-channels %PACKAGES%
+  if errorlevel 1 (
+    call set "STATUS=%%ERRORLEVEL%%"
+    1>&2 echo posix-env: default package installation failed.
+  ) else (
+    echo Adding the Start menu, Windows Terminal and PATH entries ...
+    "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "%POSIX_ENV_HOME%\share\posix-env\posix-env-entries.ps1"
+    call set "STATUS=%%ERRORLEVEL%%"
+  )
   del "%COPY%"
   setlocal EnableDelayedExpansion
   exit /b !STATUS!
 )
 if /i "%VERB%"=="update" (
   echo Updating the environment in %POSIX_ENV_HOME% ...
-  "%COPY%" update --all -y --log-level error -p "%POSIX_ENV_HOME%" -c "%CHANNEL%" --override-channels >nul && echo Restart open POSIX shells to use the updated packages.
+  "%COPY%" --no-rc update --all -y -q --log-level error -p "%POSIX_ENV_HOME%" -c "%CHANNEL%" --override-channels && echo Restart open POSIX shells to use the updated packages.
   call set "STATUS=%%ERRORLEVEL%%"
   del "%COPY%"
   setlocal EnableDelayedExpansion
   exit /b !STATUS!
 )
 if /i "%VERB%"=="install" (
-  "%COPY%" install -y --log-level error -p "%POSIX_ENV_HOME%" -c "%CHANNEL%" --override-channels %ARGS% >nul
+  "%COPY%" --no-rc install -y -q --log-level error -p "%POSIX_ENV_HOME%" -c "%CHANNEL%" --override-channels %ARGS%
   call set "STATUS=%%ERRORLEVEL%%"
   del "%COPY%"
   setlocal EnableDelayedExpansion
   exit /b !STATUS!
 )
 (
-  "%COPY%" remove -y --log-level error -p "%POSIX_ENV_HOME%" %ARGS% >nul
+  "%COPY%" --no-rc remove -y -q --log-level error -p "%POSIX_ENV_HOME%" %ARGS%
   call set "STATUS=%%ERRORLEVEL%%"
   del "%COPY%"
   setlocal EnableDelayedExpansion

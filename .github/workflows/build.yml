@@ -126,6 +126,33 @@ jobs:
           if ($packages.Count -eq 0) { throw 'The build produced no packages.' }
           $packages | ForEach-Object Name
 
+      - name: Smoke-test installer and launcher setup
+        if: matrix.recipe == 'posix-env'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $prefix = Join-Path $env:RUNNER_TEMP 'posix-env-installer-smoke'
+          $marker = "$prefix.posix-env-installing"
+          try {
+            tools\install.ps1 -InstallDir $prefix -MicromambaPath tools\micromamba.exe
+            & "$prefix\posix-env.cmd" list
+            if ($LASTEXITCODE) { throw "posix-env list failed with exit code $LASTEXITCODE" }
+
+            # Exercise the launcher source included in the package being
+            # built.  The installer above deliberately uses the currently
+            # published package while validating this checkout's installer.
+            Copy-Item recipes\posix-env\posix-env.cmd "$prefix\posix-env.cmd" -Force
+            & "$prefix\posix-env.cmd" setup
+            if ($LASTEXITCODE) { throw "posix-env setup failed with exit code $LASTEXITCODE" }
+          } finally {
+            $integration = Join-Path $prefix 'share\posix-env\posix-env-entries.ps1'
+            if (Test-Path $integration) {
+              & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $integration -Remove
+            }
+            if (Test-Path $prefix) { Remove-Item -LiteralPath $prefix -Recurse -Force }
+            if (Test-Path $marker) { Remove-Item -LiteralPath $marker -Force }
+          }
+
       - name: Upload packages
         if: contains(fromJSON(needs.select.outputs.changed), matrix.recipe)
         uses: actions/upload-artifact@v4

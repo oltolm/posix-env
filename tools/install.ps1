@@ -133,15 +133,21 @@ try {
     (New-Object Text.UTF8Encoding $false))
   Move-Item -Force -LiteralPath $condarcTemporary -Destination $condarc
 
-  if ($NoUserIntegration) {
-    Write-Host 'Installing the default packages ...'
-    Invoke-Micromamba (@('install', '-y', '--log-level', 'error', '-p', $InstallDir,
-      '-c', $Channel, '--override-channels') + $defaultPackages)
-  } else {
-    $launcher = Join-Path $InstallDir 'posix-env.cmd'
-    & $launcher setup
+  # Keep the whole package transaction on the downloaded, hash-checked
+  # micromamba with its isolated configuration and cache.  Handing this to
+  # the installed launcher used a second copied process with different I/O
+  # and configuration; a native failure there left no useful diagnostics.
+  Write-Host 'Installing the default packages ...'
+  Invoke-Micromamba (@('install', '-y', '--log-level', 'error', '-p', $InstallDir,
+    '-c', $Channel, '--override-channels') + $defaultPackages)
+
+  if (-not $NoUserIntegration) {
+    Write-Host 'Adding the Start menu, Windows Terminal and PATH entries ...'
+    $integration = Join-Path $InstallDir 'share\posix-env\posix-env-entries.ps1'
+    $windowsPowerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    & $windowsPowerShell -NoProfile -ExecutionPolicy Bypass -File $integration
     if ($LASTEXITCODE -ne 0) {
-      throw "posix-env setup failed with exit code $LASTEXITCODE"
+      throw "User integration failed with exit code $LASTEXITCODE"
     }
   }
 
