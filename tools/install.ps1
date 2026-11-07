@@ -1,15 +1,13 @@
 # Bootstraps posix-env from a public conda channel.  The channel URL must
 # contain the platform subdirectories (win-64 and noarch).
 #
-#   powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 `
-#     -Channel https://example.github.io/posix-env/channel
+#   powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1
 #
 # POSIX_ENV_HOME changes the default installation directory.  -InstallDir
 # takes precedence.
 [CmdletBinding()]
 param(
-  [Parameter(Mandatory = $true)]
-  [string]$Channel,
+  [string]$Channel = 'https://oltolm.github.io/posix-env/channel',
 
   [string]$InstallDir = $(
     if ($env:POSIX_ENV_HOME) { $env:POSIX_ENV_HOME }

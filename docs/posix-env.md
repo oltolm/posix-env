@@ -13,19 +13,17 @@ rattler-build and installed with micromamba. Only the local channel in
 
 ## Using it
 
-To install from a published channel, download `install.ps1` and run it with
-the channel's HTTPS URL:
+To install from the published channel, download `install.ps1` and run:
 
 ```
-powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 -Channel https://OWNER.github.io/posix-env/channel
+powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1
 ```
 
 The installer downloads the pinned micromamba release, checks its SHA-256,
 creates `%USERPROFILE%\posix-env`, records the channel and runs `posix-env
-setup`. `-InstallDir DIR` chooses another directory. `-NoUserIntegration`
-installs the default packages without adding the user PATH, Start menu or
-Windows Terminal entries. The concrete channel URL will replace the example
-when the public channel is deployed.
+setup`. `-InstallDir DIR` chooses another directory, `-Channel URL` selects a
+different channel, and `-NoUserIntegration` installs the default packages
+without adding the user PATH, Start menu or Windows Terminal entries.
 
 The launcher is `posix-env.cmd` at the top of the environment
 (`%USERPROFILE%\posix-env\posix-env.cmd`), installed by the posix-env
