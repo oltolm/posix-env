@@ -97,6 +97,11 @@ build RECIPE [RECIPE...] [-- rattler-build options]
   skipped ("Skipping build for ..."): rattler-build would keep the old
   file's size and hash in `repodata.json`, and installs would fail. Raise
   `build.number` to build a changed recipe.
+- GitHub Actions builds changed recipes on pushes to `master` and on pull
+  requests. Each recipe gets a clean Windows job and uses the published
+  posix-env channel only to provide its build dependencies. The resulting
+  packages are retained as workflow artifacts for 14 days. The workflow can
+  also be run manually with a space- or comma-separated list of recipes.
 
 Recipe conventions:
 

@@ -71,6 +71,11 @@ build RECIPE [RECIPE...] [-- rattler-build options]
 use only packages already present in the local channel; they do not fall back
 to conda-forge.
 
+GitHub Actions builds recipe directories changed by pushes to `master` or by
+pull requests. A manual run accepts a space- or comma-separated recipe list.
+Each clean build uses the published posix-env channel for build dependencies
+and retains its resulting packages as a workflow artifact for 14 days.
+
 See [the full documentation](docs/posix-env.md) for package details, build
 conventions, environment behavior, performance measurements and current
 limitations. Open work is tracked in [TODO.md](TODO.md).

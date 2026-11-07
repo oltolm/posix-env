@@ -1,0 +1,121 @@
+name: Build recipes
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      recipes:
+        description: Space- or comma-separated recipe names (defaults to zlib)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  select:
+    runs-on: ubuntu-latest
+    outputs:
+      recipes: ${{ steps.recipes.outputs.recipes }}
+      count: ${{ steps.recipes.outputs.count }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Select recipes
+        id: recipes
+        shell: pwsh
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          INPUT_RECIPES: ${{ inputs.recipes }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $available = @(Get-ChildItem recipes -Directory | ForEach-Object Name)
+
+          if ($env:EVENT_NAME -eq 'workflow_dispatch') {
+            $requested = @($env:INPUT_RECIPES -split '[,\s]+' | Where-Object { $_ })
+            if ($requested.Count -eq 0) { $requested = @('zlib') }
+            $unknown = @($requested | Where-Object { $_ -notin $available })
+            if ($unknown.Count) { throw "Unknown recipe: $($unknown -join ', ')" }
+            $selected = @($requested | Sort-Object -Unique)
+          } else {
+            $base = if ($env:EVENT_NAME -eq 'pull_request') {
+              $env:BASE_SHA
+            } elseif ($env:BEFORE_SHA -and $env:BEFORE_SHA -notmatch '^0+$') {
+              $env:BEFORE_SHA
+            } else {
+              'HEAD^'
+            }
+            $changed = @(git diff --name-only $base $env:GITHUB_SHA)
+            if ($LASTEXITCODE) { throw "git diff failed" }
+            $selected = @(
+              $changed |
+                Where-Object { $_ -match '^recipes/([^/]+)/' } |
+                ForEach-Object { $Matches[1] } |
+                Sort-Object -Unique
+            )
+            if ($changed -match '^(build\.cmd|tools/fetch\.ps1|\.github/workflows/build\.yml)$') {
+              $selected = @($selected + 'zlib' | Sort-Object -Unique)
+            }
+          }
+
+          $json = ConvertTo-Json -InputObject @($selected) -Compress
+          "recipes=$json" >> $env:GITHUB_OUTPUT
+          "count=$($selected.Count)" >> $env:GITHUB_OUTPUT
+          if ($selected.Count) {
+            "Building: $($selected -join ', ')"
+          } else {
+            'No recipes changed.'
+          }
+
+  build:
+    needs: select
+    if: needs.select.outputs.count != '0'
+    runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        recipe: ${{ fromJSON(needs.select.outputs.recipes) }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install external UCRT64 toolchain
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-rust
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+
+      - name: Download pinned build tools
+        shell: powershell
+        run: tools\fetch.ps1
+
+      - name: Build ${{ matrix.recipe }}
+        shell: cmd
+        env:
+          POSIX_ENV_BOOTSTRAP_CHANNEL: https://oltolm.github.io/posix-env/channel
+        run: build.cmd ${{ matrix.recipe }}
+
+      - name: Check package output
+        shell: powershell
+        run: |
+          $packages = @(Get-ChildItem output\win-64\*.conda)
+          if ($packages.Count -eq 0) { throw 'The build produced no packages.' }
+          $packages | ForEach-Object Name
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-${{ matrix.recipe }}-${{ github.sha }}
+          path: output/win-64/
+          if-no-files-found: error
+          retention-days: 14
