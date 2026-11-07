@@ -15,7 +15,8 @@ rattler-build and installed with micromamba. Only the local channel in
 
 To install from the published channel, download `install.ps1` and run:
 
-```
+```powershell
+Invoke-WebRequest https://github.com/oltolm/posix-env/releases/download/channel/install.ps1 -OutFile install.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1
 ```
 
@@ -100,8 +101,10 @@ build RECIPE [RECIPE...] [-- rattler-build options]
 - GitHub Actions builds changed recipes on pushes to `master` and on pull
   requests. Each recipe gets a clean Windows job and uses the published
   posix-env channel only to provide its build dependencies. The resulting
-  packages are retained as workflow artifacts for 14 days. The workflow can
-  also be run manually with a space- or comma-separated list of recipes.
+  packages are retained as workflow artifacts for 14 days. Successful builds
+  from `master` are published to the rolling channel; pull requests and manual
+  runs only produce artifacts. The workflow can be run manually with a space-
+  or comma-separated list of recipes.
 
 Recipe conventions:
 
@@ -122,23 +125,27 @@ Recipe conventions:
 - `#!` scripts that must be started by Windows programs get a copy of
   `scriptexe.exe` as `NAME.exe` next to them (`zgrep`, `xzgrep`, `autopoint`).
 
-## Publishing a release
+## Publishing rolling updates
 
-Tag the commit containing the recipes and patches used for the release, push
-the tag, then publish the already-built local channel:
+The permanent `channel` GitHub Release is an append-only package store. Package
+filenames are immutable, so every changed recipe must raise its version or
+`build.number`. A push to `master` builds and tests each changed recipe, uploads
+only its new `.conda` files, merges their records into the existing indexes and
+redeploys `https://oltolm.github.io/posix-env/channel`. Unchanged packages are
+neither rebuilt nor uploaded.
 
+To publish packages built locally instead, validate or publish `output\` with:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\release.ps1 -PrepareOnly
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\release.ps1 -Publish
 ```
-git tag v0.1.0
-git push origin v0.1.0
-powershell -NoProfile -ExecutionPolicy Bypass -File tools\release.ps1 -Tag v0.1.0
-```
 
-The script validates the tag, stages the `.conda` packages, installer,
-channel indexes and `SHA256SUMS`, and creates a draft GitHub Release. Publishing
-the draft runs `channel.yml`, which deploys `repodata.json` for `win-64` and
-`noarch` to `https://oltolm.github.io/posix-env/channel`; package downloads
-come from the immutable Release assets. Use `-PrepareOnly` to validate and
-stage locally, or `-Publish` to create a published release immediately.
+`release.ps1` rejects an existing package filename whose SHA-256 differs,
+preserves all earlier package records, replaces only the indexes, checksums and
+installer, and triggers `channel.yml` to deploy the indexes to GitHub Pages.
+Version tags may still be used as source checkpoints and release notes, but do
+not own duplicate copies of the package channel.
 
 ## Conventions of the environment
 

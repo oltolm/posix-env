@@ -9,8 +9,8 @@ automatic path translation.
 The environment is distributed as `.conda` packages and managed by its own
 micromamba executable. Package operations use only the posix-env channel.
 
-> **Status:** pre-release. The recipes and local build/install workflow are
-> usable, but the public package channel has not been deployed yet.
+> **Status:** rolling release. The public package channel and installer are
+> available from the [rolling channel release](https://github.com/oltolm/posix-env/releases/tag/channel).
 
 ## Why posix-env?
 
@@ -34,10 +34,10 @@ layer. Paths remain native Windows paths written with `/`, for example
 
 ## Installation
 
-The first public release will provide the standalone `install.ps1` bootstrap.
-Installation will use:
+Download the standalone bootstrap from the rolling channel and run it:
 
 ```powershell
+Invoke-WebRequest https://github.com/oltolm/posix-env/releases/download/channel/install.ps1 -OutFile install.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1
 ```
 
@@ -74,7 +74,9 @@ to conda-forge.
 GitHub Actions builds recipe directories changed by pushes to `master` or by
 pull requests. A manual run accepts a space- or comma-separated recipe list.
 Each clean build uses the published posix-env channel for build dependencies
-and retains its resulting packages as a workflow artifact for 14 days.
+and retains its resulting packages as a workflow artifact for 14 days. After
+a successful `master` build, CI adds only the new immutable package files to
+the rolling channel and refreshes its indexes.
 
 See [the full documentation](docs/posix-env.md) for package details, build
 conventions, environment behavior, performance measurements and current

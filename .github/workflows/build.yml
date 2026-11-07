@@ -20,6 +20,8 @@ jobs:
     outputs:
       recipes: ${{ steps.recipes.outputs.recipes }}
       count: ${{ steps.recipes.outputs.count }}
+      changed: ${{ steps.recipes.outputs.changed }}
+      changed_count: ${{ steps.recipes.outputs.changed_count }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -42,7 +44,8 @@ jobs:
             if ($requested.Count -eq 0) { $requested = @('zlib') }
             $unknown = @($requested | Where-Object { $_ -notin $available })
             if ($unknown.Count) { throw "Unknown recipe: $($unknown -join ', ')" }
-            $selected = @($requested | Sort-Object -Unique)
+            $recipeChanges = @($requested | Sort-Object -Unique)
+            $selected = $recipeChanges
           } else {
             $base = if ($env:EVENT_NAME -eq 'pull_request') {
               $env:BASE_SHA
@@ -53,20 +56,24 @@ jobs:
             }
             $changed = @(git diff --name-only $base $env:GITHUB_SHA)
             if ($LASTEXITCODE) { throw "git diff failed" }
-            $selected = @(
+            $recipeChanges = @(
               $changed |
                 Where-Object { $_ -match '^recipes/([^/]+)/' } |
                 ForEach-Object { $Matches[1] } |
                 Sort-Object -Unique
             )
+            $selected = $recipeChanges
             if ($changed -match '^(build\.cmd|tools/fetch\.ps1|\.github/workflows/build\.yml)$') {
               $selected = @($selected + 'zlib' | Sort-Object -Unique)
             }
           }
 
           $json = ConvertTo-Json -InputObject @($selected) -Compress
+          $changedJson = ConvertTo-Json -InputObject @($recipeChanges) -Compress
           "recipes=$json" >> $env:GITHUB_OUTPUT
           "count=$($selected.Count)" >> $env:GITHUB_OUTPUT
+          "changed=$changedJson" >> $env:GITHUB_OUTPUT
+          "changed_count=$($recipeChanges.Count)" >> $env:GITHUB_OUTPUT
           if ($selected.Count) {
             "Building: $($selected -join ', ')"
           } else {
@@ -120,9 +127,41 @@ jobs:
           $packages | ForEach-Object Name
 
       - name: Upload packages
+        if: contains(fromJSON(needs.select.outputs.changed), matrix.recipe)
         uses: actions/upload-artifact@v4
         with:
           name: packages-${{ matrix.recipe }}-${{ github.sha }}
-          path: output/win-64/
+          path: |
+            output/win-64/*.conda
+            output/win-64/repodata.json
+            output/noarch/*.conda
+            output/noarch/repodata.json
           if-no-files-found: error
           retention-days: 14
+
+  publish:
+    needs: [select, build]
+    if: github.event_name == 'push' && needs.select.outputs.changed_count != '0'
+    runs-on: windows-2025
+    concurrency:
+      group: rolling-channel
+      cancel-in-progress: false
+    permissions:
+      actions: write
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download built packages
+        uses: actions/download-artifact@v5
+        with:
+          pattern: packages-*
+          path: ${{ runner.temp }}/incoming
+
+      - name: Publish rolling channel update
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          tools\release.ps1 -Publish
+          -InputRoot "$env:RUNNER_TEMP\incoming"

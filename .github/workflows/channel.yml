@@ -1,14 +1,7 @@
 name: Deploy package channel
 
 on:
-  release:
-    types: [published]
   workflow_dispatch:
-    inputs:
-      tag:
-        description: Existing GitHub Release tag to deploy
-        required: true
-        type: string
 
 permissions:
   contents: read
@@ -27,7 +20,7 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     env:
       GH_TOKEN: ${{ github.token }}
-      RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
+      RELEASE_TAG: channel
     steps:
       - name: Download channel indexes
         run: |
@@ -68,13 +61,12 @@ jobs:
           import os
           from pathlib import Path
 
-          tag = html.escape(os.environ['RELEASE_TAG'])
           repository = html.escape(os.environ['GITHUB_REPOSITORY'])
           Path('site/index.html').write_text(f'''<!doctype html>
           <meta charset="utf-8">
           <title>posix-env package channel</title>
           <h1>posix-env package channel</h1>
-          <p>Current release: <a href="https://github.com/{repository}/releases/tag/{tag}">{tag}</a></p>
+          <p><a href="https://github.com/{repository}/releases/tag/channel">Rolling package assets</a></p>
           <p>Channel URL: <code>https://oltolm.github.io/posix-env/channel</code></p>
           <p><a href="https://github.com/{repository}">Source, recipes and patches</a></p>
           ''', encoding='utf-8')

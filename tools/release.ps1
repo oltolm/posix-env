@@ -1,127 +1,265 @@
-# Publishes the already-built output\ channel as a GitHub Release.  The
-# .conda packages are immutable release assets; GitHub Pages serves only the
-# two repodata.json files, whose base_url points back to those assets.
+# Updates the cumulative GitHub Release used as the rolling package channel.
+# Package assets are immutable and append-only. Only packages not already in
+# the release are uploaded; repodata, checksums and the installer are replaced.
 #
-# Create and push TAG first.  A draft release is the default; publishing it
-# triggers .github/workflows/channel.yml.  -Publish skips the draft step.
-# -PrepareOnly builds and validates the assets without contacting GitHub.
+# InputRoot may be a normal rattler-build output directory or a directory of
+# downloaded CI artifacts. Every usable index must be directly inside a
+# win-64 or noarch directory, beside the packages it describes.
 #
 #   powershell -NoProfile -ExecutionPolicy Bypass -File tools\release.ps1 `
-#     -Tag v0.1.0 [-PrepareOnly | -Publish]
+#     [-InputRoot output] [-PrepareOnly | -Publish]
 [CmdletBinding()]
 param(
-  [Parameter(Mandatory = $true)]
-  [ValidatePattern('^v[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$')]
-  [string]$Tag,
+  [string]$InputRoot,
   [switch]$PrepareOnly,
-  [switch]$Publish
+  [switch]$Publish,
+  [switch]$NoDeploy
 )
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot
-$channel = Join-Path $root 'output'
+if (-not $InputRoot) { $InputRoot = Join-Path $root 'output' }
+$InputRoot = [IO.Path]::GetFullPath($InputRoot)
 $repository = 'oltolm/posix-env'
-$releaseBaseUrl = "https://github.com/$repository/releases/download/$Tag"
-$stage = Join-Path $env:TEMP "posix-env-release-$Tag"
+$channelTag = 'channel'
+$releaseBaseUrl = "https://github.com/$repository/releases/download/$channelTag"
+$stage = Join-Path $env:TEMP 'posix-env-rolling-channel'
 $assets = Join-Path $stage 'assets'
+$previous = Join-Path $stage 'previous'
 $utf8 = New-Object Text.UTF8Encoding $false
 
-function Invoke-Native {
-  $exe, $arguments = $args
-  & $exe @arguments
+if ($PrepareOnly -and $Publish) {
+  throw 'Use either -PrepareOnly or -Publish, not both.'
+}
+if (-not $PrepareOnly -and -not $Publish) {
+  throw 'Specify -PrepareOnly to validate or -Publish to update the rolling channel.'
+}
+
+function Invoke-Native([string]$Exe, [string[]]$Arguments) {
+  $output = & $Exe @Arguments
   if ($LASTEXITCODE -ne 0) {
-    throw "$exe failed with exit code $LASTEXITCODE"
+    throw "$Exe failed with exit code $LASTEXITCODE"
+  }
+  return $output
+}
+
+function New-Repodata([string]$Subdir) {
+  return [pscustomobject][ordered]@{
+    info = [pscustomobject][ordered]@{ subdir = $Subdir; base_url = $releaseBaseUrl }
+    packages = [pscustomobject]@{}
+    'packages.conda' = [pscustomobject]@{}
+    removed = @()
+    repodata_version = 1
   }
 }
 
-function Write-Repodata([string]$Subdir) {
-  $source = Join-Path $channel "$Subdir\repodata.json"
-  if (-not (Test-Path $source)) { throw "Missing $source" }
-  $repodata = Get-Content -LiteralPath $source -Raw | ConvertFrom-Json
-  if (-not $repodata.info) {
-    $repodata | Add-Member -MemberType NoteProperty -Name info -Value ([pscustomobject]@{})
+function Merge-Repodata($Target, $Source, [string]$Description) {
+  $subdir = $Source.info.subdir
+  if ($subdir -ne $Target.info.subdir) {
+    throw "$Description has subdir '$subdir', expected '$($Target.info.subdir)'."
   }
-  $repodata.info | Add-Member -MemberType NoteProperty -Name base_url `
-    -Value $releaseBaseUrl -Force
-  $destination = Join-Path $assets "repodata-$Subdir.json"
-  [IO.File]::WriteAllText($destination,
-    ($repodata | ConvertTo-Json -Depth 100 -Compress), $utf8)
+  foreach ($sectionName in 'packages', 'packages.conda') {
+    $sourceSection = $Source.PSObject.Properties[$sectionName].Value
+    if (-not $sourceSection) { continue }
+    $targetSection = $Target.PSObject.Properties[$sectionName].Value
+    foreach ($property in $sourceSection.PSObject.Properties) {
+      $existing = $targetSection.PSObject.Properties[$property.Name]
+      if ($existing) {
+        $oldHash = $existing.Value.sha256
+        $newHash = $property.Value.sha256
+        if ($oldHash -ne $newHash -or $existing.Value.size -ne $property.Value.size) {
+          throw "Conflicting repodata for $($property.Name) in $Description. Raise the recipe build number."
+        }
+      } else {
+        $targetSection | Add-Member -MemberType NoteProperty -Name $property.Name -Value $property.Value
+      }
+    }
+  }
+  $Target.removed = @($Target.removed + $Source.removed | Sort-Object -Unique)
+  if ($Source.repodata_version -gt $Target.repodata_version) {
+    $Target.repodata_version = $Source.repodata_version
+  }
 }
 
-if (-not (Test-Path (Join-Path $channel 'win-64\repodata.json'))) {
-  throw 'No built channel was found in output\. Build the packages first.'
+if (-not (Test-Path -LiteralPath $InputRoot)) {
+  throw "Input directory does not exist: $InputRoot"
 }
 
-# TAG is constrained above, and the resolved staging path must remain directly
-# below TEMP before an earlier staging directory is removed.
 $tempRoot = [IO.Path]::GetFullPath($env:TEMP).TrimEnd('\')
 $stage = [IO.Path]::GetFullPath($stage)
 if ([IO.Path]::GetDirectoryName($stage) -ne $tempRoot) {
   throw "Refusing to use staging directory outside $tempRoot"
 }
 if (Test-Path $stage) { Remove-Item -Recurse -Force -LiteralPath $stage }
-New-Item -ItemType Directory -Path $assets | Out-Null
+New-Item -ItemType Directory -Path $assets, $previous | Out-Null
 
-$names = @{}
-foreach ($subdir in 'win-64', 'noarch') {
-  foreach ($package in Get-ChildItem (Join-Path $channel $subdir) -File -Filter '*.conda') {
-    if ($names.ContainsKey($package.Name)) {
-      throw "Package name occurs in more than one subdirectory: $($package.Name)"
-    }
-    $names[$package.Name] = $true
-    Copy-Item -LiteralPath $package.FullName -Destination $assets
-  }
-  Write-Repodata $subdir
+$indexes = @{'win-64' = New-Repodata 'win-64'; 'noarch' = New-Repodata 'noarch'}
+$incomingIndexes = @(
+  Get-ChildItem -LiteralPath $InputRoot -Recurse -File -Filter 'repodata.json' |
+    Where-Object { $_.Directory.Name -in @('win-64', 'noarch') }
+)
+if (-not $incomingIndexes.Count) {
+  throw "No win-64 or noarch repodata.json was found below $InputRoot."
 }
-if (-not $names.Count) { throw 'The channel contains no .conda packages.' }
 
+$releaseExists = $false
+$assetByName = @{}
+if (Get-Command gh -ErrorAction SilentlyContinue) {
+  $savedErrorActionPreference = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try {
+    $releaseOutput = & gh release view $channelTag --repo $repository --json assets,isDraft,url 2>&1
+    $releaseExitCode = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $savedErrorActionPreference
+  }
+  if ($releaseExitCode -eq 0) {
+    $releaseExists = $true
+    $release = ($releaseOutput -join "`n") | ConvertFrom-Json
+    foreach ($asset in $release.assets) { $assetByName[$asset.name] = $asset }
+    Invoke-Native gh @('release', 'download', $channelTag, '--repo', $repository,
+      '--pattern', 'repodata-*.json', '--dir', $previous) | Out-Null
+    foreach ($subdir in 'win-64', 'noarch') {
+      $path = Join-Path $previous "repodata-$subdir.json"
+      if (-not (Test-Path $path)) { throw "The rolling release is missing repodata-$subdir.json." }
+      $data = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+      Merge-Repodata $indexes[$subdir] $data $path
+    }
+  } elseif ($Publish) {
+    $releaseError = ($releaseOutput -join "`n")
+    if ($releaseError -notmatch 'release not found') {
+      throw "Could not inspect the rolling release: $releaseError"
+    }
+  }
+} elseif ($Publish) {
+  throw 'GitHub CLI (gh) is required to publish the channel.'
+}
+
+$inputPackages = @{}
+foreach ($indexFile in $incomingIndexes) {
+  $subdir = $indexFile.Directory.Name
+  $data = Get-Content -LiteralPath $indexFile.FullName -Raw | ConvertFrom-Json
+  Merge-Repodata $indexes[$subdir] $data $indexFile.FullName
+  foreach ($package in Get-ChildItem -LiteralPath $indexFile.Directory.FullName -File -Filter '*.conda') {
+    if ($inputPackages.ContainsKey($package.Name) -and
+        $inputPackages[$package.Name].FullName -ne $package.FullName) {
+      throw "Package appears in more than one input directory: $($package.Name)"
+    }
+    $inputPackages[$package.Name] = $package
+  }
+}
+if (-not $inputPackages.Count) { throw 'The input contains no .conda packages.' }
+
+$indexedNames = @{}
+foreach ($subdir in 'win-64', 'noarch') {
+  foreach ($sectionName in 'packages', 'packages.conda') {
+    $section = $indexes[$subdir].PSObject.Properties[$sectionName].Value
+    foreach ($property in $section.PSObject.Properties) {
+      if ($indexedNames.ContainsKey($property.Name)) {
+        throw "Package name occurs more than once in channel repodata: $($property.Name)"
+      }
+      $indexedNames[$property.Name] = $subdir
+    }
+  }
+}
+
+$newPackages = @()
+$packageHashes = @{}
+foreach ($entry in $inputPackages.GetEnumerator() | Sort-Object Key) {
+  $name = $entry.Key
+  $file = $entry.Value
+  if (-not $indexedNames.ContainsKey($name)) {
+    throw "$name is not present in its adjacent repodata.json."
+  }
+  $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+  if ($assetByName.ContainsKey($name)) {
+    $remoteHash = $assetByName[$name].digest -replace '^sha256:', ''
+    if ($remoteHash -ne $hash) {
+      throw "$name already exists with different bytes. Raise the recipe build number."
+    }
+  } else {
+    Copy-Item -LiteralPath $file.FullName -Destination $assets
+    $newPackages += Get-Item -LiteralPath (Join-Path $assets $name)
+  }
+  $packageHashes[$name] = $hash
+}
+
+foreach ($name in $indexedNames.Keys) {
+  if (-not $packageHashes.ContainsKey($name)) {
+    if (-not $assetByName.ContainsKey($name)) {
+      throw "Channel repodata names $name, but no package asset is available."
+    }
+    $packageHashes[$name] = $assetByName[$name].digest -replace '^sha256:', ''
+  }
+}
+
+foreach ($subdir in 'win-64', 'noarch') {
+  $indexes[$subdir].info.base_url = $releaseBaseUrl
+  $destination = Join-Path $assets "repodata-$subdir.json"
+  [IO.File]::WriteAllText($destination,
+    ($indexes[$subdir] | ConvertTo-Json -Depth 100 -Compress), $utf8)
+}
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'install.ps1') -Destination $assets
 
-$checksumLines = foreach ($file in Get-ChildItem $assets -File | Sort-Object Name) {
-  $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-  "$hash  $($file.Name)"
+$checksumLines = @()
+foreach ($name in $packageHashes.Keys | Sort-Object) {
+  $checksumLines += "$($packageHashes[$name])  $name"
+}
+foreach ($name in 'install.ps1', 'repodata-noarch.json', 'repodata-win-64.json') {
+  $path = Join-Path $assets $name
+  $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+  $checksumLines += "$hash  $name"
 }
 [IO.File]::WriteAllLines((Join-Path $assets 'SHA256SUMS'), $checksumLines, $utf8)
 
 $notes = @"
-# posix-env $($Tag.TrimStart('v'))
+# posix-env rolling package channel
 
-Install on 64-bit Windows:
+This release is the append-only asset store for the public posix-env package
+channel. Package filenames are immutable. Updates add only new package builds
+and replace the channel indexes, checksums and installer.
 
-``````powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1
-``````
-
-The package recipes and patches used for this release are in tag ``$Tag``.
-The stable channel URL is https://oltolm.github.io/posix-env/channel.
+Install from https://oltolm.github.io/posix-env/channel. Source recipes and
+patches are in the repository; every package also contains its rendered recipe.
 "@
 [IO.File]::WriteAllText((Join-Path $stage 'notes.md'), $notes, $utf8)
 
-Write-Host "Prepared $($names.Count) packages in $assets"
+Write-Host "Prepared a cumulative index with $($indexedNames.Count) packages."
+Write-Host "New package assets: $($newPackages.Count)"
 Write-Host "Package base URL: $releaseBaseUrl"
 if ($PrepareOnly) { return }
 
-if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
-  throw 'GitHub CLI (gh) is required to publish the release.'
-}
-if (git -C $root status --porcelain) {
-  throw 'The Git working tree is not clean.'
-}
-$head = Invoke-Native git @('-C', $root, 'rev-parse', 'HEAD')
-$tagCommit = Invoke-Native git @('-C', $root, 'rev-parse', "$Tag^{commit}")
-if ($head -ne $tagCommit) { throw "$Tag does not point to HEAD." }
-Invoke-Native git @('-C', $root, 'ls-remote', '--exit-code', '--tags', 'origin', "refs/tags/$Tag")
-Invoke-Native gh @('auth', 'status')
+& git -C $root diff --quiet
+if ($LASTEXITCODE -ne 0) { throw 'Tracked files have uncommitted changes.' }
+& git -C $root diff --cached --quiet
+if ($LASTEXITCODE -ne 0) { throw 'The Git index has uncommitted changes.' }
+Invoke-Native gh @('auth', 'status') | Out-Null
 
-$releaseArguments = @('release', 'create', $Tag, '--repo', $repository,
-  '--verify-tag', '--title', "posix-env $($Tag.TrimStart('v'))",
-  '--notes-file', (Join-Path $stage 'notes.md'))
-if (-not $Publish) { $releaseArguments += '--draft' }
-$releaseArguments += @(Get-ChildItem $assets -File | Sort-Object Name | ForEach-Object FullName)
-Invoke-Native gh $releaseArguments
-
-if ($Publish) {
-  Write-Host 'Published the release; the package-channel workflow will deploy GitHub Pages.'
+$metadata = @(
+  (Join-Path $assets 'install.ps1'),
+  (Join-Path $assets 'repodata-win-64.json'),
+  (Join-Path $assets 'repodata-noarch.json'),
+  (Join-Path $assets 'SHA256SUMS')
+)
+if (-not $releaseExists) {
+  $allAssets = @($newPackages | ForEach-Object FullName) + $metadata
+  Invoke-Native gh (@('release', 'create', $channelTag, '--repo', $repository,
+    '--target', 'master', '--title', 'posix-env rolling package channel',
+    '--notes-file', (Join-Path $stage 'notes.md'), '--latest=false') + $allAssets) | Out-Null
+  Write-Host "Created the rolling release with $($newPackages.Count) packages."
 } else {
-  Write-Host 'Created a draft release. Review and publish it to deploy the package channel.'
+  if ($newPackages.Count) {
+    Invoke-Native gh (@('release', 'upload', $channelTag, '--repo', $repository) +
+      @($newPackages | ForEach-Object FullName)) | Out-Null
+  }
+  Invoke-Native gh (@('release', 'upload', $channelTag, '--repo', $repository,
+    '--clobber') + $metadata) | Out-Null
+  Invoke-Native gh @('release', 'edit', $channelTag, '--repo', $repository,
+    '--notes-file', (Join-Path $stage 'notes.md'), '--latest=false') | Out-Null
+  Write-Host "Uploaded $($newPackages.Count) new packages and refreshed channel metadata."
+}
+
+if (-not $NoDeploy) {
+  Invoke-Native gh @('workflow', 'run', 'channel.yml', '--repo', $repository, '--ref', 'master') | Out-Null
+  Write-Host 'Triggered the GitHub Pages channel deployment.'
 }
