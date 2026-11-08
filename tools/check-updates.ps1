@@ -21,6 +21,7 @@ $skip = @{
   libsystre = 'local compatibility library'
   'posix-env' = 'this repository'
   scriptexe = 'this repository'
+  tcl = 'Tcl 9 is incompatible; the recipe stays on Tcl 8.6'
 }
 
 # Non-GNU, non-GitHub release directories.  The named capture must contain
@@ -31,7 +32,6 @@ $listings = @{
   file = @('https://astron.com/pub/file/', 'file-(?<version>\d+(?:\.\d+)+)\.tar\.gz')
   less = @('https://www.greenwoodsoftware.com/less/download.html', 'less-(?<version>\d+)\.tar\.gz')
   pkgconf = @('https://distfiles.ariadne.space/pkgconf/', 'pkgconf-(?<version>\d+(?:\.\d+)+)\.tar\.xz')
-  tcl = @('https://sourceforge.net/projects/tcl/rss?path=/Tcl', 'tcl(?<version>\d+(?:\.\d+)+)-src\.tar\.gz')
 }
 
 $webCache = @{}
