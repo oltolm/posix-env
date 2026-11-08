@@ -1,7 +1,7 @@
 # micromamba, the upstream release binary: the launcher installed in the
 # environment manages its packages with it.
 context:
-  version: "2.9.0"
+  version: "2.10.0"
 
 package:
   name: micromamba
@@ -9,7 +9,7 @@ package:
 
 source:
   url: https://github.com/mamba-org/micromamba-releases/releases/download/${{ version }}-0/micromamba-win-64.exe
-  sha256: a6d804394b2418991c4e29562853eaace2f2ce9d9da661a98e74e02e8dbb44b0
+  sha256: f8b4284bd4eb1134122eaf93b3ea6c7be567e596de5829e1a6f478e34e41974a
   file_name: micromamba.exe
 
 build:

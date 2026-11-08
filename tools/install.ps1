@@ -25,8 +25,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$micromambaUrl = 'https://github.com/mamba-org/micromamba-releases/releases/download/2.9.0-0/micromamba-win-64.exe'
-$micromambaSha256 = 'a6d804394b2418991c4e29562853eaace2f2ce9d9da661a98e74e02e8dbb44b0'
+$micromambaUrl = 'https://github.com/mamba-org/micromamba-releases/releases/download/2.10.0-0/micromamba-win-64.exe'
+$micromambaSha256 = 'f8b4284bd4eb1134122eaf93b3ea6c7be567e596de5829e1a6f478e34e41974a'
 $defaultPackages = @(
   'posix-env', 'autoconf', 'automake', 'libtool', 'gettext-tools', 'pkgconf',
   'diffutils', 'patch', 'file', 'gzip', 'libarchive', 'xz', 'zstd', 'less'

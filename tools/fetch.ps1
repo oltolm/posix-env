@@ -7,8 +7,8 @@ $tools = @(
      Url = 'https://github.com/prefix-dev/rattler-build/releases/download/v0.76.1/rattler-build-x86_64-pc-windows-msvc.exe'
      Sha256 = '131e3d9e6d67e7b5e873627567e74708e1722a40e78bcd3619dc4b20906fbb64' },
   @{ Name = 'micromamba.exe'
-     Url = 'https://github.com/mamba-org/micromamba-releases/releases/download/2.9.0-0/micromamba-win-64.exe'
-     Sha256 = 'a6d804394b2418991c4e29562853eaace2f2ce9d9da661a98e74e02e8dbb44b0' }
+     Url = 'https://github.com/mamba-org/micromamba-releases/releases/download/2.10.0-0/micromamba-win-64.exe'
+     Sha256 = 'f8b4284bd4eb1134122eaf93b3ea6c7be567e596de5829e1a6f478e34e41974a' }
 )
 foreach ($t in $tools) {
   $dest = Join-Path $PSScriptRoot $t.Name
