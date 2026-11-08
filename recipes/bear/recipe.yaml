@@ -1,5 +1,5 @@
 context:
-  version: "4.2.2"
+  version: "4.2.4"
 
 package:
   name: bear
@@ -7,13 +7,13 @@ package:
 
 source:
   url: https://github.com/rizsotto/Bear/archive/${{ version }}/bear-${{ version }}.tar.gz
-  sha256: 9f9d0236bf0751cb4f5d747c077697f396546ba1ad8653c2e9b7192ea47df14a
+  sha256: 1a771dba88f9687e58b6c35537336bab7a26dc196b2d37f868c7a83a310ab959
   patches:
     # cc and c++ (make's default CC=cc) were never recognized on Windows.
     - 0001-semantic-recognize-cc-and-c-on-Windows.patch
 
 build:
-  number: 1
+  number: 0
   script:
     interpreter: brush
     content:

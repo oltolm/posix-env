@@ -1,22 +1,5 @@
-From 651d4fff99d79d022101de65a306bfc89fd6297f Mon Sep 17 00:00:00 2001
-From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
-Date: Tue, 13 Oct 2026 20:57:07 +0200
-Subject: [PATCH] semantic: recognize cc and c++ on Windows
-
-MinGW toolchains ship cc.exe and c++.exe (GCC in MinGW-w64, Clang in
-llvm-mingw), and make's default CC=cc runs them. The --version probe
-that classifies these names was Unix-only, so on Windows they were never
-recognized and bear -- make wrote an empty compilation database. The
-probe now runs on Windows too (the child alone is killed on timeout, as
-there is no process group), and .exe is dropped before the name is
-looked up.
----
- .../compilers/compiler_recognition.rs         |   6 +
- .../src/interpreters/compilers/probe.rs       | 168 +++++++++++++-----
- 2 files changed, 133 insertions(+), 41 deletions(-)
-
 diff --git a/crates/semantic/src/interpreters/compilers/compiler_recognition.rs b/crates/semantic/src/interpreters/compilers/compiler_recognition.rs
-index dca2ecb..1c1bf1d 100644
+index 8dfbca8..d19710f 100644
 --- a/crates/semantic/src/interpreters/compilers/compiler_recognition.rs
 +++ b/crates/semantic/src/interpreters/compilers/compiler_recognition.rs
 @@ -104,6 +104,12 @@ impl CompilerRecognizer {
@@ -33,7 +16,7 @@ index dca2ecb..1c1bf1d 100644
              && let Some(t) = self.probe_canonical(executable_path)
          {
 diff --git a/crates/semantic/src/interpreters/compilers/probe.rs b/crates/semantic/src/interpreters/compilers/probe.rs
-index 2bd66f0..5cb078f 100644
+index c7a3e81..79298d4 100644
 --- a/crates/semantic/src/interpreters/compilers/probe.rs
 +++ b/crates/semantic/src/interpreters/compilers/probe.rs
 @@ -30,11 +30,11 @@
@@ -75,16 +58,7 @@ index 2bd66f0..5cb078f 100644
  impl<P: CompilerProbe> CompilerProbe for CachingProbe<P> {
      fn probe(&self, executable_path: &Path) -> Option<CompilerType> {
          if let Some(&hit) = self.cache.borrow().get(executable_path) {
-@@ -102,7 +102,7 @@ impl<P: CompilerProbe> CompilerProbe for CachingProbe<P> {
- ///
- /// On a Unix lib build neither use applies, so silence the dead-code
- /// lint that would otherwise fire there.
--#[cfg_attr(all(unix, not(test)), allow(dead_code))]
-+#[cfg_attr(all(any(unix, windows), not(test)), allow(dead_code))]
- pub(crate) struct NoProbe;
- 
- impl CompilerProbe for NoProbe {
-@@ -113,6 +113,8 @@ impl CompilerProbe for NoProbe {
+@@ -110,6 +110,8 @@ impl CompilerProbe for NoProbe {
  
  #[cfg(unix)]
  pub(crate) use unix::VersionProbe;
@@ -93,7 +67,7 @@ index 2bd66f0..5cb078f 100644
  
  /// The default probe for the current target. On Unix wraps a real
  /// `VersionProbe` in a [`CachingProbe`] so each unique compiler path is
-@@ -121,11 +123,11 @@ pub(crate) use unix::VersionProbe;
+@@ -118,11 +120,11 @@ pub(crate) use unix::VersionProbe;
  /// by the regex layer) returns a `NoProbe`; caching a no-op would just be
  /// overhead.
  pub(crate) fn default_probe() -> Box<dyn CompilerProbe> {
@@ -107,7 +81,7 @@ index 2bd66f0..5cb078f 100644
      {
          Box::new(NoProbe)
      }
-@@ -215,10 +217,44 @@ mod caching_tests {
+@@ -212,10 +214,44 @@ mod caching_tests {
      }
  }
  
@@ -152,7 +126,7 @@ index 2bd66f0..5cb078f 100644
      use intercept::environment::{KEY_OS_MACOS_PRELOAD_PATH, KEY_OS_PRELOAD_PATH};
      use std::os::unix::process::CommandExt;
      use std::path::Path;
-@@ -341,38 +377,6 @@ mod unix {
+@@ -347,38 +383,6 @@ mod unix {
          }
      }
  
@@ -191,7 +165,7 @@ index 2bd66f0..5cb078f 100644
      #[cfg(test)]
      mod tests {
          //! Requirements: recognition-ambiguous-name-probe
-@@ -593,3 +597,85 @@ mod unix {
+@@ -599,3 +603,85 @@ mod unix {
          }
      }
  }
@@ -277,6 +251,17 @@ index 2bd66f0..5cb078f 100644
 +        }
 +    }
 +}
--- 
-2.56.0.windows.1
+diff --git a/crates/semantic/src/interpreters/compilers/probe.rs b/crates/semantic/src/interpreters/compilers/probe.rs
+index e0e9d34..5d4e2f1 100644
+--- a/crates/semantic/src/interpreters/compilers/probe.rs
++++ b/crates/semantic/src/interpreters/compilers/probe.rs
+@@ -99,7 +99,7 @@ impl<P: CompilerProbe> CompilerProbe for CachingProbe<P> {
+ /// - in unit tests of `CompilerRecognizer` that want to exercise the
+ ///   regex/hint layer deterministically without depending on whatever
+ ///   `cc`/`c++` resolve to on the host.
+-#[cfg_attr(all(unix, not(test)), allow(dead_code, reason = "on a Unix lib build neither use applies"))]
++#[cfg_attr(all(any(unix, windows), not(test)), allow(dead_code, reason = "a library build uses neither probe"))]
+ pub(crate) struct NoProbe;
+
+ impl CompilerProbe for NoProbe {
 
