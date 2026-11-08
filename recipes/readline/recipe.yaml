@@ -1,5 +1,5 @@
 context:
-  version: "8.3.003"
+  version: "8.3.006"
   base: "8.3"
 
 package:
@@ -10,10 +10,11 @@ source:
   url: https://ftpmirror.gnu.org/gnu/readline/readline-${{ base }}.tar.gz
   sha256: fe5383204467828cd495ee8d1d3c037a7eba1389c22bc6a041f627976f9061cc
   patches:
-    # The official patches readline83-001 to -003, as unified diffs.
+    # The official patches readline83-001 to -006, as unified diffs.
     - 001-readline83-001.patch
     - 002-readline83-002.patch
     - 003-readline83-003.patch
+    - 004-readline83-004-006.patch
     # From MSYS2's mingw-w64-readline; 0001 and 0002 come from mxe-octave.
     - 0001-sigwinch.patch
     - 0002-event-hook.patch
@@ -21,7 +22,7 @@ source:
     - 0004-locale.patch
 
 build:
-  number: 5
+  number: 0
   script:
     interpreter: brush
     content:
