@@ -1,5 +1,5 @@
 context:
-  version: "1.18.1"
+  version: "1.20"
 
 package:
   name: automake
@@ -7,13 +7,13 @@ package:
 
 source:
   url: https://ftpmirror.gnu.org/gnu/automake/automake-${{ version }}.tar.xz
-  sha256: 168aa363278351b89af56684448f525a5bce5079d0b6842bd910fdd3f1646887
+  sha256: f6f34dad4cbe395715762b0710f7c511e39bd5cf777e6b95818ccbecf7714248
   patches:
     - 0001-unix-paths-in-makefiles.patch
     - 0002-win32-exit-status.patch
 
 build:
-  number: 5
+  number: 0
   script:
     interpreter: brush
     file: build.sh
@@ -60,7 +60,7 @@ tests:
         - if not exist t.exe exit /b 1
         # A failed command's exit status is reported and propagated (patch 0002).
         # One line: the script stops at a line that leaves an errorlevel.
-        - 'perl -I"%PREFIX%\share\automake-1.18" -MAutomake::FileUtils -e "system(''cmd /c exit 3''); Automake::FileUtils::handle_exec_errors(''t'')" 2> err.txt & if errorlevel 4 (exit /b 1) else if errorlevel 3 (findstr /c:"t failed with exit status: 3" err.txt) else exit /b 1'
+        - 'perl -I"%PREFIX%\share\automake-1.20" -MAutomake::FileUtils -e "system(''cmd /c exit 3''); Automake::FileUtils::handle_exec_errors(''t'')" 2> err.txt & if errorlevel 4 (exit /b 1) else if errorlevel 3 (findstr /c:"t failed with exit status: 3" err.txt) else exit /b 1'
 
 about:
   homepage: https://www.gnu.org/software/automake/
