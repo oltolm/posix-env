@@ -13,8 +13,20 @@ $tools = @(
 foreach ($t in $tools) {
   $dest = Join-Path $PSScriptRoot $t.Name
   if ((Test-Path $dest) -and (Get-FileHash $dest -Algorithm SHA256).Hash -eq $t.Sha256) { continue }
-  Invoke-WebRequest -Uri $t.Url -OutFile "$dest.tmp" -UseBasicParsing
-  $hash = (Get-FileHash "$dest.tmp" -Algorithm SHA256).Hash
-  if ($hash -ne $t.Sha256) { Remove-Item "$dest.tmp"; throw "$($t.Name): SHA-256 $hash, expected $($t.Sha256)" }
-  Move-Item -Force "$dest.tmp" $dest
+  $temporary = "$dest.tmp"
+  for ($attempt = 1; $attempt -le 3; $attempt++) {
+    try {
+      Invoke-WebRequest -Uri $t.Url -OutFile $temporary -UseBasicParsing
+      break
+    } catch {
+      if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }
+      if ($attempt -eq 3) { throw }
+      $delay = 5 * $attempt
+      Write-Warning "$($t.Name): download attempt $attempt failed; retrying in $delay seconds"
+      Start-Sleep -Seconds $delay
+    }
+  }
+  $hash = (Get-FileHash $temporary -Algorithm SHA256).Hash
+  if ($hash -ne $t.Sha256) { Remove-Item -LiteralPath $temporary; throw "$($t.Name): SHA-256 $hash, expected $($t.Sha256)" }
+  Move-Item -Force $temporary $dest
 }
