@@ -1,5 +1,5 @@
 context:
-  version: "3.6.5"
+  version: "4.1.0"
 
 package:
   name: openssl
@@ -7,9 +7,9 @@ package:
 
 source:
   url: https://github.com/openssl/openssl/releases/download/openssl-${{ version }}/openssl-${{ version }}.tar.gz
-  sha256: a2157c2830efdec3788939b00c9b0638306d3f0bbb76dc4832ee503bb397df98
+  sha256: 50c17baf54cb008f6ce42d50deb4b28050a1aad711636cabd4b241c7e90cc2fd
   patches:
-    # OPENSSLDIR, ENGINESDIR and MODULESDIR follow the installation.
+    # OPENSSLDIR and MODULESDIR follow the installation.
     - 0001-relocation.patch
     - 0002-arch-suffix.patch
 
@@ -24,7 +24,6 @@ requirements:
     - ${{ pin_subpackage('openssl', upper_bound='x') }}
   build:
     - posix-env
-    - perl
   host:
     - zlib
 
@@ -33,15 +32,16 @@ tests:
       interpreter: cmd
       content:
         - openssl version -a
-        # The directories were relocated: none names the build prefix.
-        - openssl version -d -e -m | findstr /c:"h_env" && exit /b 1 || ver > NUL
+        # The runtime directories were relocated: neither names the build prefix.
+        - openssl info -configdir | findstr /c:"h_env" && exit /b 1 || ver > NUL
+        - openssl info -modulesdir | findstr /c:"h_env" && exit /b 1 || ver > NUL
         # Loading the legacy provider needs the relocated MODULESDIR.
         - openssl list -providers -provider legacy | findstr /c:"legacy" || exit /b 1
         - echo abc | openssl dgst -sha256 || exit /b 1
   - package_contents:
       files:
-        - bin/libcrypto-3-x64.dll
-        - bin/libssl-3-x64.dll
+        - bin/libcrypto-4-x64.dll
+        - bin/libssl-4-x64.dll
         - lib/libcrypto.dll.a
         - lib/pkgconfig/openssl.pc
         - include/openssl/ssl.h

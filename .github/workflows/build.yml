@@ -98,6 +98,7 @@ jobs:
           msystem: UCRT64
           update: true
           install: >-
+            perl
             mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-rust
             mingw-w64-ucrt-x86_64-cmake
