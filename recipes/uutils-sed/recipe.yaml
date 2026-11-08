@@ -1,5 +1,5 @@
 context:
-  version: "0.2.0"
+  version: "0.3.0"
 
 package:
   name: uutils-sed
@@ -7,19 +7,16 @@ package:
 
 source:
   url: https://github.com/uutils/sed/archive/refs/tags/${{ version }}.tar.gz
-  sha256: a5a03b3871b963420d1408b11415c90d4d69df02ab4f2f82826b42899a61a87a
+  sha256: d879d292ff93f4f769f299fb183be69d3ea6bcedeb2a698d944595ebc3a8dd6c
   # GNU sed behaviour that autoconf's config.status and libtool rely on.
   patches:
     - 0001-sed-end-the-replacement-at-an-delimiter.patch
     - 0002-sed-drop-the-backslash-of-unknown-escapes-in-replace.patch
     - 0003-sed-escape-bracket-expression-literals-that-are-spec.patch
-    - 0004-sed-continue-with-the-next-command-after-n.patch
     - 0005-sed-treat-escaped-anchors-as-literals.patch
-    # Backport: "sed -i SCRIPT FILE" took SCRIPT as the backup suffix.
-    - 0006-sed-take-the-i-suffix-only-when-attached.patch
 
 build:
-  number: 1
+  number: 0
   script:
     interpreter: brush
     content:
