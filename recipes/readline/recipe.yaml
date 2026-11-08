@@ -32,8 +32,10 @@ build:
       # __USE_MINGW_ALARM: mingw-w64 provides a dummy alarm().
       # libgcc is linked statically: the toolchain's DLLs are not part of any
       # environment.
+      # Autoconf 2.73's traditional-egrep check uses a separate variable;
+      # there is no standalone egrep executable in the native environment.
       - >-
-        ./configure --prefix="$PREFIX" --enable-shared --disable-static --without-curses
+        EGREP_TRADITIONAL="$EGREP" ./configure --prefix="$PREFIX" --enable-shared --disable-static --without-curses
         CC="gcc -static-libgcc" CFLAGS="-O2 -DNEED_EXTERN_PC=1 -D__USE_MINGW_ALARM -D_POSIX"
         CPPFLAGS="-I$PREFIX/include" LDFLAGS="-L$PREFIX/lib"
       - make -j"$(nproc)"
