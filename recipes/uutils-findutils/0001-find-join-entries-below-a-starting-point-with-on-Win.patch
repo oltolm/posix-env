@@ -1,22 +1,3 @@
-From 80e5064c5abbd64c13ad9ea9de957823f37e3c4f Mon Sep 17 00:00:00 2001
-From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
-Date: Sun, 4 Oct 2026 12:23:43 +0200
-Subject: [PATCH] find: join entries below a starting point with `/` on
- Windows
-
----
- src/find/matchers/entry.rs   | 64 ++++++++++++++++++++++++++++++++++++
- src/find/matchers/exec.rs    | 24 +++++++++++---
- src/find/matchers/mod.rs     |  3 +-
- src/find/matchers/path.rs    |  6 ----
- src/find/matchers/regex.rs   |  6 ----
- src/find/mod.rs              | 11 ++-----
- tests/common/test_helpers.rs | 12 ++-----
- tests/exec_unit_tests.rs     | 32 +++++++++++++-----
- tests/find_exec_tests.rs     | 24 ++++++++++----
- tests/test_find.rs           | 32 +++---------------
- 10 files changed, 137 insertions(+), 77 deletions(-)
-
 diff --git a/src/find/matchers/entry.rs b/src/find/matchers/entry.rs
 index 649413d..c1b1b9f 100644
 --- a/src/find/matchers/entry.rs
@@ -132,37 +113,10 @@ index 649413d..c1b1b9f 100644
 +    }
 +}
 diff --git a/src/find/matchers/exec.rs b/src/find/matchers/exec.rs
-index c061e26..9b95f74 100644
+index f117004..bd19052 100644
 --- a/src/find/matchers/exec.rs
 +++ b/src/find/matchers/exec.rs
-@@ -8,11 +8,25 @@ use std::cell::RefCell;
- use std::error::Error;
- use std::ffi::OsString;
- use std::io::{stderr, Write};
--use std::path::Path;
-+use std::path::{Component, Path, PathBuf};
- use std::process::Command;
- 
- use super::{Matcher, MatcherIO, WalkEntry};
- 
-+/// `./NAME`, as GNU find passes it to -execdir commands; `Path::join` would
-+/// produce `.\NAME` on Windows.
-+fn dot_slash(path: &Path) -> PathBuf {
-+    if matches!(
-+        path.components().next(),
-+        Some(Component::Prefix(_) | Component::RootDir)
-+    ) {
-+        return Path::new(".").join(path);
-+    }
-+    let mut s = OsString::from("./");
-+    s.push(path);
-+    s.into()
-+}
-+
- enum Arg {
-     FileArg(Vec<OsString>),
-     LiteralArg(OsString),
-@@ -72,9 +86,9 @@ impl Matcher for SingleExecMatcher {
+@@ -103,9 +103,9 @@ impl Matcher for SingleExecMatcher {
      fn matches(&self, file_info: &WalkEntry, matcher_io: &mut MatcherIO) -> bool {
          let path_to_file = if self.exec_in_parent_dir {
              if let Some(f) = file_info.path().file_name() {
@@ -174,7 +128,7 @@ index c061e26..9b95f74 100644
              }
          } else {
              file_info.path().to_path_buf()
-@@ -193,9 +207,9 @@ impl Matcher for MultiExecMatcher {
+@@ -224,9 +224,9 @@ impl Matcher for MultiExecMatcher {
      fn matches(&self, file_info: &WalkEntry, matcher_io: &mut MatcherIO) -> bool {
          let path_to_file = if self.exec_in_parent_dir {
              if let Some(f) = file_info.path().file_name() {
@@ -187,10 +141,10 @@ index c061e26..9b95f74 100644
          } else {
              file_info.path().to_path_buf()
 diff --git a/src/find/matchers/mod.rs b/src/find/matchers/mod.rs
-index e35ebbb..0009462 100644
+index 59d1154..27897f4 100644
 --- a/src/find/matchers/mod.rs
 +++ b/src/find/matchers/mod.rs
-@@ -1072,11 +1072,12 @@ mod tests {
+@@ -1265,11 +1265,12 @@ mod tests {
          let root = fix_up_slashes(root);
          let root = Path::new(&root);
  
@@ -204,83 +158,11 @@ index e35ebbb..0009462 100644
          };
  
          let depth = path.components().count() - root.components().count();
-diff --git a/src/find/matchers/path.rs b/src/find/matchers/path.rs
-index c9db349..62c5d2e 100644
---- a/src/find/matchers/path.rs
-+++ b/src/find/matchers/path.rs
-@@ -35,12 +35,6 @@ mod tests {
- 
-     // Variants of fix_up_slashes that properly escape the forward slashes for
-     // being in a glob.
--    #[cfg(windows)]
--    fn fix_up_glob_slashes(re: &str) -> String {
--        re.replace("/", "\\\\")
--    }
--
--    #[cfg(not(windows))]
-     fn fix_up_glob_slashes(re: &str) -> String {
-         re.to_owned()
-     }
-diff --git a/src/find/matchers/regex.rs b/src/find/matchers/regex.rs
-index 4b85e4d..e673a39 100644
---- a/src/find/matchers/regex.rs
-+++ b/src/find/matchers/regex.rs
-@@ -124,12 +124,6 @@ mod tests {
- 
-     // Variants of fix_up_slashes that properly escape the forward slashes for
-     // being in a regex.
--    #[cfg(windows)]
--    fn fix_up_regex_slashes(re: &str) -> String {
--        re.replace("/", r"\\")
--    }
--
--    #[cfg(not(windows))]
-     fn fix_up_regex_slashes(re: &str) -> String {
-         re.to_owned()
-     }
-diff --git a/src/find/mod.rs b/src/find/mod.rs
-index f6b8075..9e0c667 100644
---- a/src/find/mod.rs
-+++ b/src/find/mod.rs
-@@ -447,14 +447,9 @@ mod tests {
- 
-     use super::*;
- 
--    #[cfg(windows)]
--    /// Windows-only bodge for converting between path separators.
--    pub fn fix_up_slashes(path: &str) -> String {
--        path.replace("/", "\\")
--    }
--
--    #[cfg(not(windows))]
--    /// Do nothing equivalent of the above for non-windows systems.
-+    /// find joins entries below a starting point with `/` on every platform,
-+    /// as GNU find does, so expected output only depends on how the starting
-+    /// point is spelled and needs no conversion.
-     pub fn fix_up_slashes(path: &str) -> String {
-         path.to_string()
-     }
 diff --git a/tests/common/test_helpers.rs b/tests/common/test_helpers.rs
-index acf5a52..a99d5d9 100644
+index a1cf9d8..29e71e2 100644
 --- a/tests/common/test_helpers.rs
 +++ b/tests/common/test_helpers.rs
-@@ -85,15 +85,6 @@ pub fn path_to_testing_commandline() -> String {
-     path_to_use.to_string_lossy().to_string()
- }
- 
--#[cfg(windows)]
--/// A copy of find::tests::fix_up_slashes.
--/// TODO: find out how to share #[cfg(test)] functions/structs between unit
--/// and integration tests.
--pub fn fix_up_slashes(path: &str) -> String {
--    path.replace("/", "\\")
--}
--
--#[cfg(not(windows))]
- pub fn fix_up_slashes(path: &str) -> String {
-     path.to_string()
- }
-@@ -106,10 +97,11 @@ pub fn get_dir_entry_for(root: &str, path: &str) -> WalkEntry {
+@@ -106,10 +106,11 @@ pub fn get_dir_entry_for(root: &str, path: &str) -> WalkEntry {
      let root = Path::new(&root);
  
      let path = fix_up_slashes(path);
@@ -408,7 +290,7 @@ index 7b2b9f5..dee1d50 100644
      );
  }
 diff --git a/tests/test_find.rs b/tests/test_find.rs
-index ce223d5..b7e9e13 100644
+index 4460395..72a5202 100644
 --- a/tests/test_find.rs
 +++ b/tests/test_find.rs
 @@ -9,7 +9,6 @@ use regex::Regex;
@@ -419,20 +301,7 @@ index ce223d5..b7e9e13 100644
  use std::time;
  use tempfile::Builder;
  use uutests::util::TestScenario;
-@@ -35,12 +34,6 @@ fn ucmd() -> uutests::util::UCommand {
- 
- // Variants of fix_up_slashes that properly escape the forward slashes for
- // use in a regex.
--#[cfg(windows)]
--fn fix_up_regex_slashes(re: &str) -> String {
--    re.replace("/", "\\\\")
--}
--
--#[cfg(not(windows))]
- fn fix_up_regex_slashes(re: &str) -> String {
-     re.to_owned()
- }
-@@ -394,10 +387,7 @@ fn empty_files() {
+@@ -704,10 +703,7 @@ fn empty_files() {
          .args(&[temp_dir_path, "-empty"])
          .succeeds()
          .no_stderr()
@@ -444,7 +313,7 @@ index ce223d5..b7e9e13 100644
  
      let subdir_path = temp_dir.path().join("subdir");
      std::fs::create_dir(&subdir_path).unwrap();
-@@ -406,11 +396,7 @@ fn empty_files() {
+@@ -716,11 +712,7 @@ fn empty_files() {
          .args(&[temp_dir_path, "-empty", "-sorted"])
          .succeeds()
          .no_stderr()
@@ -457,7 +326,7 @@ index ce223d5..b7e9e13 100644
  
      write!(test_file, "x").unwrap();
      test_file.sync_all().unwrap();
-@@ -419,10 +405,7 @@ fn empty_files() {
+@@ -729,10 +721,7 @@ fn empty_files() {
          .args(&[temp_dir_path, "-empty", "-sorted"])
          .succeeds()
          .no_stderr()
@@ -469,7 +338,7 @@ index ce223d5..b7e9e13 100644
  }
  
  #[test]
-@@ -1001,7 +984,7 @@ fn find_samefile() {
+@@ -1542,7 +1531,7 @@ fn find_samefile() {
      ucmd()
          .args(&[temp_dir_path, "-samefile", test_file_str])
          .succeeds()
@@ -478,7 +347,7 @@ index ce223d5..b7e9e13 100644
          .no_stderr();
  
      // test not exist file
-@@ -1221,12 +1204,7 @@ fn find_ok_prompt_format() {
+@@ -1904,12 +1893,7 @@ fn find_ok_prompt_format() {
          ])
          .pipe_in("n\n")
          .succeeds()
@@ -492,3 +361,36 @@ index ce223d5..b7e9e13 100644
  }
  
  #[test]
+
+diff --git a/src/find/matchers/exec.rs b/src/find/matchers/exec.rs
+index 527f03c..3f50db1 100644
+--- a/src/find/matchers/exec.rs
++++ b/src/find/matchers/exec.rs
+@@ -6,11 +6,25 @@
+ use std::cell::RefCell;
+ use std::error::Error;
+ use std::ffi::{OsStr, OsString};
+ use std::io::{stderr, Write};
+-use std::path::Path;
++use std::path::{Component, Path, PathBuf};
+ use std::process::Command;
+
+ use super::{Matcher, MatcherIO, WalkEntry};
+
++/// `./NAME`, as GNU find passes it to -execdir commands; `Path::join` would
++/// produce `.\\NAME` on Windows.
++fn dot_slash(path: &Path) -> PathBuf {
++    if matches!(
++        path.components().next(),
++        Some(Component::Prefix(_) | Component::RootDir)
++    ) {
++        return Path::new(".").join(path);
++    }
++    let mut s = OsString::from("./");
++    s.push(path);
++    s.into()
++}
++
+ enum Arg {
+     FileArg(Vec<OsString>),
+     LiteralArg(OsString),
