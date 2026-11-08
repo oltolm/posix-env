@@ -10,6 +10,11 @@ on:
         description: Space- or comma-separated recipe names (defaults to zlib)
         required: false
         type: string
+      publish:
+        description: Publish built packages to the rolling channel
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -176,7 +181,9 @@ jobs:
 
   publish:
     needs: [select, build]
-    if: github.event_name == 'push' && needs.select.outputs.changed_count != '0'
+    if: >-
+      needs.select.outputs.changed_count != '0' &&
+      (github.event_name == 'push' || inputs.publish)
     runs-on: windows-2025
     concurrency:
       group: rolling-channel
