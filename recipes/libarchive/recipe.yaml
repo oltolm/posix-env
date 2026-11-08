@@ -1,5 +1,5 @@
 context:
-  version: "3.8.9"
+  version: "3.8.11"
 
 package:
   name: libarchive
@@ -7,23 +7,16 @@ package:
 
 source:
   url: https://github.com/libarchive/libarchive/releases/download/v${{ version }}/libarchive-${{ version }}.tar.xz
-  sha256: 888c934f9d95648ecb9163dc8e23ab80a476ecb81a8f1154704a227b5b676dde
+  sha256: a3dc0872b1b39da34dc18ef1b944f0f11ffd37425d70ae04be679279f1cf43d2
   patches:
-    # Upstream merges after 3.8.9 for bsdunzip as unzip, as in MSYS2's
-    # mingw-w64-libarchive.
-    - 0001-unzip-Set-O_BINARY-on-Windows-systems-9aa710d.patch
-    - 0002-bsdunzip-Support-Z-1-as-well-9c9cb93.patch
-    - 0003-unzip-Look-up-alternative-filenames-as-well-ddf8247.patch
     # Not yet submitted upstream.
     - 0004-libarchive-Use-multithreaded-decoder-for-xz-e048b3b8.patch
     - 0005-tar-Handle-unconvertible-pathnames-in-edit_pathname.patch
     - 0006-tar-Use-UTF-8-as-Windows-active-code-page.patch
-    - 0007-configure-Quote-PLATFORMCPPFLAGS-for-MinGW.patch
-    - 0008-configure-Build-bsdunzip-on-Windows-as-well.patch
     - 0009-unzip-Use-UTF-8-as-Windows-active-code-page.patch
 
 build:
-  number: 4
+  number: 0
   script:
     interpreter: brush
     file: build.sh
