@@ -26,7 +26,9 @@ build:
       # No NLS: gettext-runtime needs libiconv, and with it in host: the
       # libiconv files already there would be left out of this package.  NLS
       # would only translate the iconv program's messages.
-      - ./configure --prefix="$PREFIX" --enable-extra-encodings --enable-shared --disable-static --disable-rpath --disable-nls
+      # Autoconf 2.73's traditional-egrep check uses a separate variable;
+      # there is no standalone egrep executable in the native environment.
+      - EGREP_TRADITIONAL="$EGREP" ./configure --prefix="$PREFIX" --enable-extra-encodings --enable-shared --disable-static --disable-rpath --disable-nls
       - make -j"$(nproc)"
       - make install
 
