@@ -7,7 +7,7 @@
 opts=(TARGET_OS=MINGW64 POSIX_ENV=Yes BUILD_STATIC=no PREFIX="$PREFIX"
       CC=gcc LDFLAGS="-static-libgcc -Wl,$BUILD_PREFIX/lib/posix-env/utf8-manifest.o -Wl,$BUILD_PREFIX/lib/posix-env/binmode.o"
       MAKE_DIR="mkdir -p" INSTALL_PROGRAM=cp INSTALL_DATA=cp)
-make -j"$(nproc)" -C lib "${opts[@]}"
+make -j"$(nproc)" -C lib "${opts[@]}" liblz4 liblz4.pc
 make -j"$(nproc)" -C programs "${opts[@]}" lz4
 make -C lib "${opts[@]}" install
 make -C programs "${opts[@]}" install
