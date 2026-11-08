@@ -22,7 +22,9 @@ build:
       # libgcc is linked statically: the toolchain's DLLs are not part of
       # any environment.  Binary I/O comes from posix-env's config.site:
       # patches apply to LF files as on POSIX systems.
-      - ./configure --prefix="$PREFIX" CC="gcc -static-libgcc"
+      # Autoconf 2.73's traditional-egrep check uses a separate variable;
+      # there is no standalone egrep executable in the native environment.
+      - EGREP_TRADITIONAL="$EGREP" ./configure --prefix="$PREFIX" CC="gcc -static-libgcc"
       - make -j"$(nproc)"
       - make install
 
