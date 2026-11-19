@@ -139,33 +139,6 @@ jobs:
           if ($packages.Count -eq 0) { throw 'The build produced no packages.' }
           $packages | ForEach-Object Name
 
-      - name: Smoke-test installer and launcher setup
-        if: matrix.recipe == 'posix-env'
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $prefix = Join-Path $env:RUNNER_TEMP 'posix-env-installer-smoke'
-          $marker = "$prefix.posix-env-installing"
-          try {
-            tools\install.ps1 -InstallDir $prefix -MicromambaPath tools\micromamba.exe
-            & "$prefix\posix-env.cmd" list
-            if ($LASTEXITCODE) { throw "posix-env list failed with exit code $LASTEXITCODE" }
-
-            # Exercise the launcher source included in the package being
-            # built.  The installer above deliberately uses the currently
-            # published package while validating this checkout's installer.
-            Copy-Item recipes\posix-env\posix-env.cmd "$prefix\posix-env.cmd" -Force
-            & "$prefix\posix-env.cmd" setup
-            if ($LASTEXITCODE) { throw "posix-env setup failed with exit code $LASTEXITCODE" }
-          } finally {
-            $integration = Join-Path $prefix 'share\posix-env\posix-env-entries.ps1'
-            if (Test-Path $integration) {
-              & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $integration -Remove
-            }
-            if (Test-Path $prefix) { Remove-Item -LiteralPath $prefix -Recurse -Force }
-            if (Test-Path $marker) { Remove-Item -LiteralPath $marker -Force }
-          }
-
       - name: Upload packages
         if: contains(fromJSON(needs.select.outputs.changed), matrix.recipe)
         uses: actions/upload-artifact@v4
@@ -179,8 +152,72 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  publish:
+  smoke:
     needs: [select, build]
+    if: needs.select.outputs.changed_count != '0'
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download pinned build tools
+        shell: powershell
+        run: tools\fetch.ps1
+
+      - name: Download built packages
+        uses: actions/download-artifact@v5
+        with:
+          pattern: packages-*
+          path: ${{ runner.temp }}/incoming
+
+      - name: Smoke-test installer and launcher setup
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $prefix = Join-Path $env:RUNNER_TEMP 'posix-env-installer-smoke'
+          $marker = "$prefix.posix-env-installing"
+          try {
+            tools\install.ps1 -InstallDir $prefix -MicromambaPath tools\micromamba.exe
+            & "$prefix\posix-env.cmd" list
+            if ($LASTEXITCODE) { throw "posix-env list failed with exit code $LASTEXITCODE" }
+
+            # Install this run's packages together, including new packages
+            # that the published channel cannot provide yet. Keep each
+            # artifact's index beside its packages; do not overwrite indexes
+            # by merging artifact directories.
+            $channels = @()
+            $specs = @()
+            Get-ChildItem "$env:RUNNER_TEMP\incoming" -Directory | ForEach-Object {
+              $channels += @('-c', ([Uri]($_.FullName + '\')).AbsoluteUri)
+              Get-ChildItem $_.FullName -Filter repodata.json -Recurse | ForEach-Object {
+                $index = Get-Content $_.FullName -Raw | ConvertFrom-Json
+                foreach ($entry in $index.'packages.conda'.PSObject.Properties) {
+                  if (Test-Path (Join-Path $_.DirectoryName $entry.Name)) {
+                    $record = $entry.Value
+                    $specs += "$($record.name)=$($record.version)=$($record.build)"
+                  }
+                }
+              }
+            }
+            if (-not $specs.Count) { throw 'No candidate packages found.' }
+            & tools\micromamba.exe --no-rc install -y -p $prefix --override-channels @channels `
+              -c https://oltolm.github.io/posix-env/channel @specs
+            if ($LASTEXITCODE) { throw "Candidate installation failed with exit code $LASTEXITCODE" }
+
+            # Test the installed launcher with its new default packages
+            # already available, before any artifacts are published.
+            & "$prefix\posix-env.cmd" setup
+            if ($LASTEXITCODE) { throw "posix-env setup failed with exit code $LASTEXITCODE" }
+          } finally {
+            $integration = Join-Path $prefix 'share\posix-env\posix-env-entries.ps1'
+            if (Test-Path $integration) {
+              & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $integration -Remove
+            }
+            if (Test-Path $prefix) { Remove-Item -LiteralPath $prefix -Recurse -Force }
+            if (Test-Path $marker) { Remove-Item -LiteralPath $marker -Force }
+          }
+
+  publish:
+    needs: [select, build, smoke]
     if: >-
       needs.select.outputs.changed_count != '0' &&
       (github.event_name == 'push' || inputs.publish)
