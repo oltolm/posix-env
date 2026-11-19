@@ -59,6 +59,17 @@ posix-env help                 # list all commands
 
 ## Building from source
 
+To prepare GCC, binutils, or recognized bundled Libtool/gettext scripts for a
+native Windows build, use `posix-env-prepare` on the source directory:
+
+```console
+posix-env-prepare --dry-run C:/src/gcc
+posix-env-prepare C:/src/gcc
+```
+
+See [source preparation](docs/source-preparation.md) for patch coverage,
+conflict handling, and running the command directly from this checkout.
+
 Download the pinned build tools, then build one or more recipes into the local
 `output\` channel:
 

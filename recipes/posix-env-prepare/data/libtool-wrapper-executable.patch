@@ -1,0 +1,13 @@
+Subject: libtool-wrapper-executable
+Origin: brush Windows compatibility patches
+
+--- a/ltmain.sh
++++ b/ltmain.sh
+@@ -1 +1,7 @@
++  /* Windows: the program's own file, which argv[0] need not name (a
++     program started as "dir/prog" gets no ".exe" in argv[0]).  */
++#if defined _WIN32 && !defined __CYGWIN__
++  tmp_pathspec = find_executable (_pgmptr);
++#else
+   tmp_pathspec = find_executable (argv[0]);
++#endif

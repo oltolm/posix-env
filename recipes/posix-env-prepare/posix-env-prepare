@@ -1,0 +1,315 @@
+#!/usr/bin/env perl
+# Apply maintained source patches before configuring a native Windows build.
+use strict;
+use warnings;
+use Cwd qw(abs_path);
+use File::Basename qw(dirname basename);
+use File::Find ();
+use File::Spec ();
+use FindBin ();
+use Getopt::Long qw(GetOptions);
+use IO::Handle ();
+use JSON::PP qw(decode_json);
+
+$| = 1;
+
+my ($dry_run, $help, $version, $project) = (0, 0, 0, 'auto');
+Getopt::Long::Configure('no_auto_abbrev', 'no_ignore_case');
+GetOptions('dry-run' => \$dry_run, 'help' => \$help,
+           'version' => \$version, 'project=s' => \$project) or exit 2;
+if ($help) {
+    print <<'HELP';
+Usage: posix-env-prepare [--dry-run] [--project=gcc|binutils|generic] [DIRECTORY]
+
+Apply maintained patches for native Windows builds (default directory: .).
+GCC and binutils are detected from their source files. Other projects receive
+only the recognized bundled Libtool/gettext fixes. All changes are checked
+before writing; already applied changes are reported and left alone.
+
+  --dry-run       Report changes without modifying the source directory
+  --project=NAME  Require this project, or select generic build-script fixes
+  --version       Print the tool version
+  --help          Show this help
+
+Run after extracting sources (and again after regenerating build scripts),
+before configure. No downloads, configure commands, or builds are performed.
+An unsupported or edited patch context is an error; no files are then changed.
+HELP
+    exit 0;
+}
+if ($version) { print "posix-env-prepare 0.1.0\n"; exit 0 }
+die "posix-env-prepare: expected at most one source directory\n" if @ARGV > 1;
+die "posix-env-prepare: unknown project '$project'\n"
+    unless $project =~ /\A(?:auto|gcc|binutils|generic)\z/;
+
+sub read_bytes {
+    my ($path) = @_;
+    open my $fh, '<:raw', $path or die "Cannot read $path: $!\n";
+    local $/;
+    my $bytes = <$fh>;
+    close $fh or die "Cannot close $path: $!\n";
+    return $bytes;
+}
+
+my $root = abs_path(@ARGV ? $ARGV[0] : '.');
+die "posix-env-prepare: source directory does not exist\n" unless defined $root && -d $root;
+$root =~ tr{\\}{/};
+my $data = "$FindBin::Bin/data";
+$data = "$FindBin::Bin/../share/posix-env/prepare" unless -f "$data/catalog.json";
+my $catalog = decode_json(read_bytes("$data/catalog.json"));
+die "Unsupported patch catalog format\n" unless $catalog->{format} == 1;
+
+# Never follow a source-tree link to a file or directory outside the tree.
+# Check every component, including for explicitly named project patch files.
+sub source_path {
+    my ($relative) = @_;
+    die "Unsafe patch path: $relative\n"
+        if $relative =~ m{(?:\A/|\\|:|(?:\A|/)\.\.?(?:/|\z))};
+    my $path = $root;
+    for my $part (split '/', $relative) {
+        $path .= "/$part";
+        die "Refusing source symlink: $relative\n" if -l $path;
+    }
+    return $path;
+}
+
+my ($detected, $upstream) = ('generic', '');
+if (-f source_path('gcc/BASE-VER')) {
+    $detected = 'gcc';
+    $upstream = read_bytes(source_path('gcc/BASE-VER'));
+    $upstream =~ s/\s+\z//;
+} elsif (-f source_path('bfd/version.m4')) {
+    $detected = 'binutils';
+    my $text = read_bytes(source_path('bfd/version.m4'));
+    ($upstream) = $text =~ /m4_define\(\[BFD_VERSION\],\s*\[([^\]]+)\]/;
+    die "Cannot identify the version in bfd/version.m4\n" unless defined $upstream;
+}
+if ($project ne 'auto' && $project ne 'generic' && $project ne $detected) {
+    die "Requested $project, but the source tree was identified as $detected\n";
+}
+$project = $detected if $project eq 'auto';
+print "Source: $root ($project", ($project eq 'generic' ? '' : " $upstream"), ")\n";
+
+# Parse ordinary unified diffs. Only modifications to existing text files are
+# supported. Hunk line numbers are advisory; all context must match exactly.
+sub read_patch {
+    my ($name) = @_;
+    my $text = read_bytes("$data/$name");
+    $text =~ s/\r\n/\n/g;
+    my @lines = $text =~ /[^\n]*\n|[^\n]+\z/g;
+    my (@files, $file);
+    for (my $i = 0; $i < @lines; ++$i) {
+        if ($lines[$i] =~ /^--- a\/(\S+)\s*$/) {
+            my $old = $1;
+            ++$i;
+            die "Unsupported file header in $name\n"
+                unless $i < @lines && $lines[$i] =~ /^\+\+\+ b\/(\S+)\s*$/ && $1 eq $old;
+            $file = { path => $old, hunks => [] };
+            push @files, $file;
+        } elsif ($lines[$i] =~ /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/) {
+            die "Hunk without file header in $name\n" unless $file;
+            my ($old_count, $new_count) = (defined $2 ? $2 : 1, defined $4 ? $4 : 1);
+            my ($old, $new, $seen_old, $seen_new, $last) = ('', '', 0, 0, '');
+            while ($seen_old < $old_count || $seen_new < $new_count) {
+                my $line = $lines[++$i] // die "Truncated patch $name\n";
+                my $kind = substr($line, 0, 1);
+                my $body = substr($line, 1);
+                if ($kind eq ' ' || $kind eq '-') { $old .= $body; ++$seen_old }
+                if ($kind eq ' ' || $kind eq '+') { $new .= $body; ++$seen_new }
+                die "Malformed hunk in $name\n" unless $kind =~ /[ +\-]/;
+                $last = $kind;
+                if ($i + 1 < @lines && $lines[$i + 1] =~ /^\\ No newline at end of file/) {
+                    chop $old if $last eq ' ' || $last eq '-';
+                    chop $new if $last eq ' ' || $last eq '+';
+                    ++$i;
+                }
+            }
+            die "Incorrect hunk counts in $name\n"
+                unless $seen_old == $old_count && $seen_new == $new_count;
+            die "Empty or unchanged hunk in $name\n" if $old eq '' || $new eq '' || $old eq $new;
+            push @{$file->{hunks}}, [$old, $new];
+        }
+    }
+    die "No modifications in $name\n" unless @files && !grep { !@{$_->{hunks}} } @files;
+    return \@files;
+}
+
+sub occurrences {
+    my ($text, $needle) = @_;
+    my @positions;
+    while ($text =~ /^\Q$needle\E/gm) { push @positions, $-[0] }
+    return @positions;
+}
+
+sub patch_text {
+    my ($text, $hunks) = @_;
+    my $changes = 0;
+    for my $hunk (@$hunks) {
+        my ($old, $new) = @$hunk;
+        my @before = occurrences($text, $old);
+        my @after = occurrences($text, $new);
+        # A pure insertion can leave the old context inside the new context.
+        @before = grep {
+            my $position = $_;
+            !grep { $position >= $_ && $position + length($old) <= $_ + length($new) } @after
+        } @before;
+        return undef if @before > 1 || @after > 1 || (@before && @after);
+        if (@after == 1) { next }
+        return undef unless @before == 1;
+        substr($text, $before[0], length($old), $new);
+        ++$changes;
+    }
+    return { text => $text, changes => $changes };
+}
+
+my (%files, @report, @errors);
+sub load_source {
+    my ($relative) = @_;
+    return $files{$relative} if exists $files{$relative};
+    my $raw = read_bytes(source_path($relative));
+    die "Not a text file: $relative\n" if index($raw, "\0") >= 0;
+    my $text = $raw;
+    $text =~ s/\r\n/\n/g;
+    return $files{$relative} = { raw => $raw, text => $text };
+}
+
+# Discover only build-script names, including bundled copies in subdirectories.
+# VCS metadata and links are not traversed. Build directories are not special:
+# a repeated run may also repair an existing generated libtool/config.status.
+my @scripts;
+File::Find::find({ no_chdir => 1, wanted => sub {
+    my $path = $File::Find::name;
+    if (-l $path || (-d $path && basename($path) =~ /\A\.(?:git|hg|svn)\z/)) {
+        $File::Find::prune = 1;
+        return;
+    }
+    return unless -f $path;
+    return unless basename($path) =~ /\A(?:ltmain\.sh|libtool|configure|configure\.ac|configure\.in|config\.status|.*\.m4|.*\.m4sh)\z/;
+    $path =~ tr{\\}{/};
+    my $relative = File::Spec->abs2rel($path, $root);
+    $relative =~ tr{\\}{/};
+    push @scripts, $relative;
+}}, $root);
+
+for my $entry (@{$catalog->{patches}}) {
+    next if $entry->{project} && $entry->{project} ne $project;
+    my @variants = map { read_patch($_) } @{$entry->{variants}};
+    if ($entry->{probe}) {
+        die "Generic patches must modify one file\n" if grep { @$_ != 1 } @variants;
+        my $probe = qr/$entry->{probe}/m;
+        for my $relative (sort @scripts) {
+            my $file = load_source($relative);
+            next unless $file->{text} =~ $probe;
+            my $result;
+            for my $variant (@variants) {
+                $result = patch_text($file->{text}, $variant->[0]{hunks});
+                last if $result;
+            }
+            if (!$result) {
+                push @errors, "$relative: unsupported or modified context for $entry->{id}";
+                next;
+            }
+            $file->{text} = $result->{text};
+            push @report, [$result->{changes} ? 'apply' : 'already applied', $entry->{id}, $relative];
+        }
+    } else {
+        # Try complete project patch variants; never mix files from variants.
+        my $selected;
+        VARIANT: for my $variant (@variants) {
+            my @results;
+            for my $part (@$variant) {
+                my $relative = $part->{path};
+                if (!-f source_path($relative)) { next VARIANT }
+                my $file = load_source($relative);
+                my $result = patch_text($file->{text}, $part->{hunks});
+                next VARIANT unless $result;
+                push @results, [$relative, $result];
+            }
+            $selected = \@results;
+            last;
+        }
+        if (!$selected) {
+            push @errors, "$entry->{id}: missing files or unsupported/modified context (" .
+                join(', ', map { $_->{path} } @{$variants[0]}) . ')';
+            next;
+        }
+        for my $item (@$selected) {
+            my ($relative, $result) = @$item;
+            $files{$relative}{text} = $result->{text};
+            push @report, [$result->{changes} ? 'apply' : 'already applied', $entry->{id}, $relative];
+        }
+    }
+}
+
+for my $item (@report) {
+    my $action = $item->[0] eq 'apply' ? 'planned' : $item->[0];
+    print "$action: $item->[1] ($item->[2])\n";
+}
+if (@errors) {
+    print STDERR "CONFLICT: $_\n" for @errors;
+    die "Preparation failed; no files changed.\n";
+}
+if (!@report) {
+    die "No supported source patches found; no files changed.\n";
+}
+
+my @changed;
+for my $relative (sort keys %files) {
+    my $file = $files{$relative};
+    my $original = $file->{raw};
+    $original =~ s/\r\n/\n/g;
+    next if $file->{text} eq $original;
+    my $bytes = $file->{text};
+    if ($file->{raw} =~ /\r\n/) {
+        die "Mixed line endings in $relative; no files changed.\n" if $file->{raw} =~ /(?<!\r)\n/;
+        $bytes =~ s/\n/\r\n/g;
+    }
+    $file->{output} = $bytes;
+    push @changed, $relative;
+}
+# Write macro inputs before generated configure/config.status files, so the
+# latter do not immediately look out of date to make after preparation.
+sub write_order {
+    return 0 if $_[0] =~ /\.(?:m4|m4sh)\z/ || basename($_[0]) =~ /\Aconfigure\.(?:ac|in)\z/;
+    return 2 if basename($_[0]) eq 'configure';
+    return 3 if basename($_[0]) eq 'config.status';
+    return 1;
+}
+@changed = sort { write_order($a) <=> write_order($b) || $a cmp $b } @changed;
+if (!$dry_run && @changed) {
+    # Open and verify every target before the first write. Preserve file modes
+    # and restore original bytes if a write fails. This is not crash-atomic.
+    my %handles;
+    for my $relative (@changed) {
+        my $path = source_path($relative);
+        open my $fh, '+<:raw', $path or die "Cannot open $path for writing: $!; no files changed.\n";
+        local $/;
+        my $current = <$fh>;
+        die "$relative changed during preparation; no files changed.\n" unless $current eq $files{$relative}{raw};
+        $handles{$relative} = $fh;
+    }
+    my @written;
+    eval {
+        for my $relative (@changed) {
+            my $fh = $handles{$relative};
+            push @written, $relative;
+            seek($fh, 0, 0) or die "Cannot seek $relative: $!\n";
+            print {$fh} $files{$relative}{output} or die "Cannot write $relative: $!\n";
+            $fh->flush or die "Cannot flush $relative: $!\n";
+            truncate($fh, length($files{$relative}{output})) or die "Cannot truncate $relative: $!\n";
+        }
+    };
+    if (my $error = $@) {
+        for my $relative (reverse @written) {
+            my $fh = $handles{$relative};
+            seek($fh, 0, 0) && print({$fh} $files{$relative}{raw}) && $fh->flush &&
+                truncate($fh, length($files{$relative}{raw}))
+                or warn "Could not restore $relative: $!\n";
+        }
+        die $error;
+    }
+    for my $relative (@changed) {
+        close $handles{$relative} or die "Cannot close $relative: $!\n";
+    }
+}
+print scalar(@changed), $dry_run ? " file(s) would change.\n" : " file(s) changed.\n";

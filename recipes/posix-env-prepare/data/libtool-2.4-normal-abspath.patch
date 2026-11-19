@@ -1,0 +1,101 @@
+Subject: libtool-2.4-normal-abspath
+Origin: brush Windows compatibility patches
+
+--- a/ltmain.sh
++++ b/ltmain.sh
+@@ -1,83 +1,95 @@
+ func_normal_abspath ()
+ {
+     $debug_cmd
+ 
+     # These SED scripts presuppose an absolute path with a trailing slash.
+     _G_pathcar='s|^/\([^/]*\).*$|\1|'
+     _G_pathcdr='s|^/[^/]*||'
+     _G_removedotparts=':dotsl
+ 		s|/\./|/|g
+ 		t dotsl
+ 		s|/\.$|/|'
+     _G_collapseslashes='s|/\{1,\}|/|g'
+     _G_finalslash='s|/*$|/|'
+ 
+     # Start from root dir and reassemble the path.
+     func_normal_abspath_result=
+     func_normal_abspath_tpath=$1
+     func_normal_abspath_altnamespace=
+     case $func_normal_abspath_tpath in
+       "")
+         # Empty path, that just means $cwd.
+         func_stripname '' '/' "`pwd`"
+         func_normal_abspath_result=$func_stripname_result
+         return
+         ;;
+       # The next three entries are used to spot a run of precisely
+       # two leading slashes without using negated character classes;
+       # we take advantage of case's first-match behaviour.
+       ///*)
+         # Unusual form of absolute path, do nothing.
+         ;;
+       //*)
+         # Not necessarily an ordinary path; POSIX reserves leading '//'
+         # and for example Cygwin uses it to access remote file shares
+         # over CIFS/SMB, so we conserve a leading double slash if found.
+         func_normal_abspath_altnamespace=/
+         ;;
+       /*)
+         # Absolute path, do nothing.
+         ;;
++      [a-zA-Z]:/*)
++        # Absolute path with a drive letter, as a native Windows shell spells it.
++        ;;
+       *)
+         # Relative path, prepend $cwd.
+         func_normal_abspath_tpath=`pwd`/$func_normal_abspath_tpath
++        ;;
++    esac
++    # The loop below consumes the path one leading "/component" at a time, so a
++    # drive letter (possibly from `pwd` above) would never be consumed.  Set it
++    # aside like a leading double slash.
++    case $func_normal_abspath_tpath in
++      [a-zA-Z]:/*)
++        func_normal_abspath_altnamespace=`$ECHO "$func_normal_abspath_tpath" | $SED 's|^\(..\).*|\1|'`
++        func_normal_abspath_tpath=`$ECHO "$func_normal_abspath_tpath" | $SED 's|^..||'`
+         ;;
+     esac
+ 
+     # Cancel out all the simple stuff to save iterations.  We also want
+     # the path to end with a slash for ease of parsing, so make sure
+     # there is one (and only one) here.
+     func_normal_abspath_tpath=`$ECHO "$func_normal_abspath_tpath" | $SED \
+           -e "$_G_removedotparts" -e "$_G_collapseslashes" -e "$_G_finalslash"`
+     while :; do
+       # Processed it all yet?
+       if test / = "$func_normal_abspath_tpath"; then
+         # If we ascended to the root using ".." the result may be empty now.
+         if test -z "$func_normal_abspath_result"; then
+           func_normal_abspath_result=/
+         fi
+         break
+       fi
+       func_normal_abspath_tcomponent=`$ECHO "$func_normal_abspath_tpath" | $SED \
+           -e "$_G_pathcar"`
+       func_normal_abspath_tpath=`$ECHO "$func_normal_abspath_tpath" | $SED \
+           -e "$_G_pathcdr"`
+       # Figure out what to do with it
+       case $func_normal_abspath_tcomponent in
+         "")
+           # Trailing empty path component, ignore it.
+           ;;
+         ..)
+           # Parent dir; strip last assembled component from result.
+           func_dirname "$func_normal_abspath_result"
+           func_normal_abspath_result=$func_dirname_result
+           ;;
+         *)
+           # Actual path component, append it.
+           func_append func_normal_abspath_result "/$func_normal_abspath_tcomponent"
+           ;;
+       esac
+     done
+     # Restore leading double-slash if one was found on entry.
+     func_normal_abspath_result=$func_normal_abspath_altnamespace$func_normal_abspath_result
+ }

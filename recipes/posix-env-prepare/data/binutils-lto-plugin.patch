@@ -1,0 +1,18 @@
+From 7a9b6b59c2b4cd4801d58a0a5d966fa54dac42a6 Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Thu, 8 Oct 2026 20:09:35 +0200
+Subject: [PATCH] ld: Recognize native MinGW LTO plugin name
+
+
+diff --git a/ld/testsuite/config/default.exp b/ld/testsuite/config/default.exp
+index 3c16e7b7158..a4e3563548c 100644
+--- a/ld/testsuite/config/default.exp
++++ b/ld/testsuite/config/default.exp
+@@ -572,6 +572,7 @@ set plug_opt ""
+ if { [check_compiler_available] } {
+     set plugin_names {
+ 	liblto_plugin.so
++	liblto_plugin.dll
+ 	liblto_plugin-0.dll
+ 	cyglto_plugin-0.dll
+     }

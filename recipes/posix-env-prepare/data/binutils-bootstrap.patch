@@ -1,0 +1,81 @@
+From 34d30f5b8aa9b84f70dea65e4d7d2bfbfcf17a75 Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Tue, 6 Oct 2026 23:45:53 +0200
+Subject: [PATCH] ld/testsuite: Run the bootstrap tests on Windows hosts
+
+bootstrap.exp failed on mingw: it linked ld1 with -ldl for plugin
+support, which MinGW and Cygwin do not have (plugins are loaded with
+LoadLibrary there), and it named the linkers it builds without the
+executable suffix.  The links in tmpdir/gccld[123] are made before
+the linkers exist, so the compiler, which looks for ld.exe, found
+nothing to run, and strip, the PE comparison and the cleanup did not
+find tmpdir/ld1, ld2 and ld3, which are ld1.exe, ld2.exe and ld3.exe.
+
+ld/
+	* testsuite/ld-bootstrap/bootstrap.exp: Do not link with -ldl on
+	mingw and cygwin.  Use the executable suffix for the links in
+	tmpdir/gccld[123] and for ld1, ld2 and ld3.
+
+diff --git a/ld/testsuite/ld-bootstrap/bootstrap.exp b/ld/testsuite/ld-bootstrap/bootstrap.exp
+index f1198000d6c..09153b8c6bc 100644
+--- a/ld/testsuite/ld-bootstrap/bootstrap.exp
++++ b/ld/testsuite/ld-bootstrap/bootstrap.exp
+@@ -79,9 +79,12 @@ if {![file exists tmpdir/ldscripts]} then {
+ foreach ldexe {ld1 ld2 ld3} {
+     if {![file isdirectory tmpdir/gcc$ldexe]} then {
+ 	catch "exec mkdir tmpdir/gcc$ldexe" status
+-	catch "exec ln -s ../$ldexe tmpdir/gcc$ldexe/ld" status
+-	catch "exec ln -s ld tmpdir/gcc$ldexe/collect-ld" status
+-	catch "exec ln -s ../../../gas/as-new tmpdir/gcc$ldexe/as" status
++	# The linker is not built yet: name the links as the compiler
++	# will look for them, with the executable suffix.
++	set x [exeext]
++	catch "exec ln -s ../$ldexe$x tmpdir/gcc$ldexe/ld$x" status
++	catch "exec ln -s ld$x tmpdir/gcc$ldexe/collect-ld$x" status
++	catch "exec ln -s ../../../gas/as-new$x tmpdir/gcc$ldexe/as$x" status
+     }
+ }
+ 
+@@ -178,9 +181,12 @@ foreach flags $test_flags {
+ 	set extralibs "$extralibs $JANSSON_LIBS"
+     }
+ 
+-    # Plugin support requires linking with libdl.
++    # Plugin support requires linking with libdl, except where dlopen is
++    # in libc (FreeBSD) or plugins are loaded with LoadLibrary (Windows).
+     if { $plugins == "yes" } {
+-	if { ![istarget "*-*-freebsd*"]} {
++	if { ![istarget "*-*-freebsd*"]
++	     && ![istarget "*-*-mingw*"]
++	     && ![istarget "*-*-cygwin*"] } {
+ 	    set extralibs "$extralibs -ldl"
+ 	}
+     }
+@@ -197,8 +203,8 @@ foreach flags $test_flags {
+     }
+ 
+     if {"$do_strip" == "yes"} { 
+-	verbose -log "$strip tmpdir/ld1"     
+-	catch "exec $strip tmpdir/ld1" exec_output
++	verbose -log "$strip tmpdir/ld1[exeext]"
++	catch "exec $strip tmpdir/ld1[exeext]" exec_output
+ 	set exec_output [prune_warnings $exec_output]
+ 	if ![string match "" $exec_output] then {
+ 	    verbose -log "$exec_output"
+@@ -244,7 +250,7 @@ foreach flags $test_flags {
+ 	# Although this works, a way to set the date would be better.
+ 	# Removing or zeroing the date stamp in the binary produced by
+ 	# the linker is not possible as it is required by the target OS.
+-	set do_compare [string map {16 220 f1 tmpdir/ld2 f2 tmpdir/ld3 tmp-foo1 tmpdir/ld2tail tmp-foo2 tmpdir/ld3tail} $DO_COMPARE]
++	set do_compare [string map [list 16 220 f1 tmpdir/ld2[exeext] f2 tmpdir/ld3[exeext] tmp-foo1 tmpdir/ld2tail tmp-foo2 tmpdir/ld3tail] $DO_COMPARE]
+ 	send_log "$do_compare\n"
+ 	verbose  "$do_compare"
+ 	catch "exec sh -c [list $do_compare]" exec_output
+@@ -266,5 +272,6 @@ foreach flags $test_flags {
+ }
+ 
+ set gcc_B_opt $gcc_B_opt_save
+-catch "exec rm -f tmpdir/ld-partial.o tmpdir/ld1 tmpdir/ld2 tmpdir/ld3" status
++set x [exeext]
++catch "exec rm -f tmpdir/ld-partial.o tmpdir/ld1$x tmpdir/ld2$x tmpdir/ld3$x" status
+ catch "exec rm -f tmpdir/ld2tail tmpdir/ld3tail" status

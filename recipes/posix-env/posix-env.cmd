@@ -73,7 +73,7 @@ if /i "%VERB%"=="search" (
   "%MAMBA%" --no-rc search -q -c "%CHANNEL%" --override-channels %ARGS%
   exit /b
 )
-set PACKAGES=posix-env autoconf automake libtool gettext-tools pkgconf ^
+set PACKAGES=posix-env posix-env-prepare autoconf automake libtool gettext-tools pkgconf ^
   diffutils patch file gzip libarchive xz zstd less
 set "COPY=%TEMP%\posix-env-micromamba-%RANDOM%.exe"
 copy /y "%MAMBA%" "%COPY%" >nul || exit /b 1

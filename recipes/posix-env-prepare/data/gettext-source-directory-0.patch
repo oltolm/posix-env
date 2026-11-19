@@ -1,0 +1,12 @@
+Subject: gettext-source-directory-0
+Origin: brush Windows compatibility patches
+
+--- a/configure
++++ b/configure
+@@ -1,5 +1,5 @@
+ case "$ac_given_srcdir" in
+   .)  top_srcdir=`echo $ac_dots|sed 's%/$%%'` ;;
+-  /*) top_srcdir="$ac_given_srcdir" ;;
++  /* | [A-Za-z]:[\\/]*) top_srcdir="$ac_given_srcdir" ;;
+   *)  top_srcdir="$ac_dots$ac_given_srcdir" ;;
+ esac

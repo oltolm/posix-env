@@ -1,0 +1,50 @@
+package:
+  name: posix-env-prepare
+  version: 0.1.0
+
+source:
+  path: .
+
+build:
+  number: 0
+  script:
+    interpreter: brush
+    content:
+      - mkdir -p "$PREFIX/bin" "$PREFIX/share/posix-env/prepare"
+      - cp posix-env-prepare "$PREFIX/bin/posix-env-prepare"
+      - cp "$PREFIX/libexec/posix-env/scriptexe.exe" "$PREFIX/bin/posix-env-prepare.exe"
+      - cp -R data/. "$PREFIX/share/posix-env/prepare/"
+
+requirements:
+  build:
+    - posix-env
+  host:
+    - scriptexe
+  run:
+    - perl
+
+tests:
+  - files:
+      recipe:
+        - test/
+    requirements:
+      run:
+        - posix-env
+    script:
+      interpreter: cmd
+      content:
+        - posix-env-prepare --help || exit /b 1
+        - perl test/run.pl "%PREFIX%/bin/posix-env-prepare" || exit /b 1
+  - package_contents:
+      files:
+        - bin/posix-env-prepare
+        - bin/posix-env-prepare.exe
+        - share/posix-env/prepare/catalog.json
+
+about:
+  license: MIT AND GPL-2.0-or-later AND GPL-3.0-or-later
+  license_file:
+    - LICENSE
+    - COPYING2
+    - COPYING3
+  summary: Apply maintained source patches for native Windows builds

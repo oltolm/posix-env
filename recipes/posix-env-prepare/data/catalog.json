@@ -1,0 +1,89 @@
+{
+  "format": 1,
+  "patches": [
+    {
+      "id": "libtool-drive-letter-paths",
+      "probe": "^func_normal_abspath\\s*\\(\\)",
+      "variants": [
+        "libtool-2.2-normal-abspath.patch",
+        "libtool-2.4-normal-abspath.patch"
+      ]
+    },
+    {
+      "id": "libtool-native-path-conversion",
+      "probe": "^func_convert_core_msys_to_w32\\s*\\(\\)",
+      "variants": [
+        "libtool-2.4.6-convert-core-msys-to-w32.patch",
+        "libtool-2.6-convert-core-msys-to-w32.patch"
+      ]
+    },
+    {
+      "id": "libtool-host-path",
+      "probe": "^func_to_host_path\\s*\\(\\)",
+      "variants": [
+        "libtool-2.2-to-host-path.patch",
+        "libtool-2.4-to-host-path.patch"
+      ]
+    },
+    {
+      "id": "libtool-host-path-list",
+      "probe": "^func_to_host_pathlist\\s*\\(\\)",
+      "variants": [
+        "libtool-2.2-to-host-pathlist.patch",
+        "libtool-2.4-to-host-pathlist.patch",
+        "libtool-2.4-to-host-pathlist-the.patch"
+      ]
+    },
+    {
+      "id": "libtool-wrapper-executable",
+      "probe": "^  tmp_pathspec = find_executable \\((?:argv\\[0\\]|_pgmptr)\\);",
+      "variants": [
+        "libtool-wrapper-executable.patch"
+      ]
+    },
+    {
+      "id": "libtool-wrapper-symlinks",
+      "probe": "^chase_symlinks \\(const char \\*pathspec\\)",
+      "variants": [
+        "libtool-wrapper-symlinks.patch"
+      ]
+    },
+    {
+      "id": "gettext-drive-letter-srcdir",
+      "probe": "^[ \\t]*case \"\\$ac_given_srcdir\" in",
+      "variants": [
+        "gettext-source-directory-0.patch",
+        "gettext-source-directory-8.patch"
+      ]
+    },
+    {
+      "id": "gcc-libgcc-build-directory",
+      "project": "gcc",
+      "variants": [
+        "gcc-libgcc-build-directory-upstream.patch",
+        "gcc-libgcc-build-directory-bindir.patch"
+      ]
+    },
+    {
+      "id": "gcc-test-library-path",
+      "project": "gcc",
+      "variants": [
+        "gcc-test-library-path.patch"
+      ]
+    },
+    {
+      "id": "binutils-lto-plugin",
+      "project": "binutils",
+      "variants": [
+        "binutils-lto-plugin.patch"
+      ]
+    },
+    {
+      "id": "binutils-bootstrap",
+      "project": "binutils",
+      "variants": [
+        "binutils-bootstrap.patch"
+      ]
+    }
+  ]
+}

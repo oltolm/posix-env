@@ -1,0 +1,27 @@
+Subject: libtool-2.6-convert-core-msys-to-w32
+Origin: brush Windows compatibility patches
+
+--- a/ltmain.sh
++++ b/ltmain.sh
+@@ -1,17 +1,9 @@
+ func_convert_core_msys_to_w32 ()
+ {
+   $debug_cmd
+ 
+-  # Compatibility for original MSYS
+-  if test "Xone" = "X$lt_cv_cmd_slashes"; then
+-  func_convert_core_msys_to_w32_result=`( cmd /c echo "$1" ) 2>/dev/null |
+-    $SED -e 's/[ ]*$//' -e "$sed_naive_backslashify"`
+-  else # Assume 'lt_cv_cmd_slashes = "two"'
+-  func_convert_core_msys_to_w32_result=`( cmd //c echo "$1" ) 2>/dev/null |
+-    $SED -e 's/[ ]*$//' -e "$sed_naive_backslashify"`
+-  fi
+-  if test "$?" -ne 0; then
+-      # on failure, ensure result is empty
+-      func_convert_core_msys_to_w32_result=
+-  fi
++  # A native Windows shell has no MSYS path conversion, and its paths are
++  # Windows paths already.
++  func_convert_core_msys_to_w32_result=`$ECHO "$1" |
++    $SED -e "$sed_naive_backslashify"`
+ }

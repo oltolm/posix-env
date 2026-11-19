@@ -1,0 +1,55 @@
+Subject: Use native paths in func_to_host_path
+Origin: Libtool 2.2.7a bundled with GCC; brush patch 0021
+
+--- a/ltmain.sh
++++ b/ltmain.sh
+@@ -1,46 +1,36 @@
+ func_to_host_path ()
+ {
+   func_to_host_path_result="$1"
+   if test -n "$1"; then
+     case $host in
+       *mingw* )
+         lt_sed_naive_backslashify='s|\\\\*|\\|g;s|/|\\|g;s|\\|\\\\|g'
+         case $build in
+-          *mingw* ) # actually, msys
+-            # awkward: cmd appends spaces to result
+-            func_to_host_path_result=`( cmd //c echo "$1" ) 2>/dev/null |
+-              $SED -e 's/[ ]*$//' -e "$lt_sed_naive_backslashify"`
++          *mingw* )
++            func_to_host_path_result=`$ECHO "$1" |
++              $SED -e "$lt_sed_naive_backslashify"`
+             ;;
+           *cygwin* )
+             func_to_host_path_result=`cygpath -w "$1" |
+ 	      $SED -e "$lt_sed_naive_backslashify"`
+             ;;
+           * )
+-            # Unfortunately, winepath does not exit with a non-zero
+-            # error code, so we are forced to check the contents of
+-            # stdout. On the other hand, if the command is not
+-            # found, the shell will set an exit code of 127 and print
+-            # *an error message* to stdout. So we must check for both
+-            # error code of zero AND non-empty stdout, which explains
+-            # the odd construction:
+             func_to_host_path_tmp1=`winepath -w "$1" 2>/dev/null`
+             if test "$?" -eq 0 && test -n "${func_to_host_path_tmp1}"; then
+               func_to_host_path_result=`$ECHO "$func_to_host_path_tmp1" |
+                 $SED -e "$lt_sed_naive_backslashify"`
+             else
+-              # Allow warning below.
+               func_to_host_path_result=
+             fi
+             ;;
+         esac
+         if test -z "$func_to_host_path_result" ; then
+           func_error "Could not determine host path corresponding to"
+           func_error "  \`$1'"
+           func_error "Continuing, but uninstalled executables may not work."
+-          # Fallback:
+           func_to_host_path_result="$1"
+         fi
+         ;;
+     esac
+   fi
+ }

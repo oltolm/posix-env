@@ -1,6 +1,7 @@
 # A snapshot of brush's development branch: the Windows fixes need code
-# from after the 0.4.0 release.  Patches 0001-0018 are the ones of MSYS2's
-# mingw-w64-brush patch series.
+# from after the 0.4.0 release. Retained patches numbered 0001-0018 come from
+# MSYS2's mingw-w64-brush patch series. Libtool/gettext source fixes formerly
+# supplied by patches 0015, 0021, 0026, and 0027 live in posix-env-prepare.
 context:
   commit: 8b539ddbb0b265d2703d841b48933d6de601cfc2
 
@@ -26,19 +27,15 @@ source:
       - 0012-fix-windows-join-PATH-entries-and-command-names-with.patch
       - 0013-fix-windows-quote-wildcard-arguments-passed-to-nativ.patch
       - 0014-fix-run-function-calls-in-pipelines-concurrently.patch
-      - 0015-feat-windows-replace-known-faulty-libtool-and-gettex.patch
       - 0016-feat-windows-implement-test-ef.patch
       - 0017-fix-pass-the-shell-s-own-stdout-stderr-to-children-a.patch
       - 0018-fix-windows-resolve-a-relative-program-path-against-.patch
       - 0019-fix-windows-spell-the-spawned-program-path-with-back.patch
       - 0020-fix-ignore-break-and-continue-outside-a-loop-as-bash.patch
-      - 0021-feat-windows-replace-libtool-s-MSYS-path-conversion.patch
       - 0022-fix-keep-command-substitution-output-that-is-not-UTF.patch
       - 0023-fix-parser-don-t-take-esac-for-a-case-pattern.patch
       - 0024-fix-tokenizer-follow-case-commands-in-command-substi.patch
       - 0025-fix-windows-start-a-program-by-its-file-name-extensi.patch
-      - 0026-fix-windows-libtool-wrappers-find-themselves-without.patch
-      - 0027-fix-windows-libtool-wrappers-follow-symbolic-links-t.patch
       - 0028-fix-windows-run-ENOEXEC-files-as-shell-scripts.patch
       - 0029-feat-windows-resolve-POSIX-bin-paths-through-PATH.patch
       - 0030-feat-windows-report-CPU-time-in-time-and-times.patch
@@ -50,7 +47,7 @@ source:
     target_directory: docs
 
 build:
-  number: 11
+  number: 12
   script:
     interpreter: brush
     file: build.sh

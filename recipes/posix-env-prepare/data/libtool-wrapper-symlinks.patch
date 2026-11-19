@@ -1,0 +1,43 @@
+Subject: libtool-wrapper-symlinks
+Origin: brush Windows compatibility patches
+
+--- a/ltmain.sh
++++ b/ltmain.sh
+@@ -1,3 +1,36 @@
+-#ifndef S_ISLNK
++#if defined _WIN32 && !defined __CYGWIN__
++  /* Windows: the file's final path, through symbolic links (the wrapper
++     may be started through a link to it, which _pgmptr names).  */
++  {
++    extern __declspec (dllimport) void *__stdcall
++      CreateFileA (const char *, unsigned long, unsigned long, void *,
++		   unsigned long, unsigned long, void *);
++    extern __declspec (dllimport) unsigned long __stdcall
++      GetFinalPathNameByHandleA (void *, char *, unsigned long, unsigned long);
++    extern __declspec (dllimport) int __stdcall CloseHandle (void *);
++    char final[LT_PATHMAX];
++    unsigned long n = 0;
++    /* GENERIC_READ 0, share read/write/delete, OPEN_EXISTING,
++       FILE_FLAG_BACKUP_SEMANTICS.  */
++    void *h = CreateFileA (pathspec, 0, 7, 0, 3, 0x02000000, 0);
++    if (h != (void *) -1)
++      {
++	n = GetFinalPathNameByHandleA (h, final, sizeof final, 0);
++	CloseHandle (h);
++      }
++    if (n > 0 && n < sizeof final)
++      {
++	if (strncmp (final, "\\\\?\\UNC\\", 8) == 0)
++	  {
++	    final[6] = '\\';
++	    return xstrdup (final + 6);
++	  }
++	if (strncmp (final, "\\\\?\\", 4) == 0)
++	  return xstrdup (final + 4);
++	return xstrdup (final);
++      }
++  }
++  return xstrdup (pathspec);
++#elif !defined S_ISLNK
+   return xstrdup (pathspec);
+ #else

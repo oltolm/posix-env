@@ -1,0 +1,74 @@
+Subject: libtool-2.4-to-host-pathlist-the
+Origin: brush Windows compatibility patches
+
+--- a/ltmain.sh
++++ b/ltmain.sh
+@@ -1,59 +1,64 @@
+ func_to_host_pathlist ()
+ {
+   func_to_host_pathlist_result="$1"
+   if test -n "$1"; then
+     case $host in
+       *mingw* )
+         lt_sed_naive_backslashify='s|\\\\*|\\|g;s|/|\\|g;s|\\|\\\\|g'
+ 	func_stripname : : "$1"
+         func_to_host_pathlist_tmp1=$func_stripname_result
+         case $build in
+           *mingw* )
+-            func_to_host_pathlist_result=`
+-	      ( cmd //c echo "$func_to_host_pathlist_tmp1" ) 2>/dev/null |
+-	      $SED -e 's/[ ]*$//' -e "$lt_sed_naive_backslashify"`
++            lt_sed_protect_drive_colon='s|\([A-Za-z]\):/|\1@_LT_DRIVE_COLON_@/|g'
++            lt_sed_pathsep_to_semicolon='s|:|;|g'
++            lt_sed_restore_drive_colon='s|@_LT_DRIVE_COLON_@|:|g'
++            func_to_host_pathlist_result=`$ECHO "$func_to_host_pathlist_tmp1" |
++	      $SED -e "$lt_sed_protect_drive_colon" \
++                -e "$lt_sed_pathsep_to_semicolon" \
++                -e "$lt_sed_restore_drive_colon" \
++                -e "$lt_sed_naive_backslashify"`
+             ;;
+           *cygwin* )
+             func_to_host_pathlist_result=`cygpath -w -p "$func_to_host_pathlist_tmp1" |
+               $SED -e "$lt_sed_naive_backslashify"`
+             ;;
+           * )
+             func_to_host_pathlist_result=""
+             func_to_host_pathlist_oldIFS=$IFS
+             IFS=:
+             for func_to_host_pathlist_f in $func_to_host_pathlist_tmp1 ; do
+               IFS=$func_to_host_pathlist_oldIFS
+               if test -n "$func_to_host_pathlist_f" ; then
+                 func_to_host_path "$func_to_host_pathlist_f"
+                 if test -n "$func_to_host_path_result" ; then
+                   if test -z "$func_to_host_pathlist_result" ; then
+                     func_to_host_pathlist_result="$func_to_host_path_result"
+                   else
+                     func_append func_to_host_pathlist_result ";$func_to_host_path_result"
+                   fi
+                 fi
+               fi
+             done
+             IFS=$func_to_host_pathlist_oldIFS
+             ;;
+         esac
+         if test -z "$func_to_host_pathlist_result"; then
+-          func_error "Could not determine the host path(s) corresponding to"
++          func_error "Could not determine host path(s) corresponding to"
+           func_error "  \`$1'"
+           func_error "Continuing, but uninstalled executables may not work."
+           lt_replace_pathsep_nix_to_dos="s|:|;|g"
+           func_to_host_pathlist_result=`echo "$func_to_host_pathlist_tmp1" |\
+             $SED -e "$lt_replace_pathsep_nix_to_dos"`
+         fi
+         case "$1" in
+           :* ) func_to_host_pathlist_result=";$func_to_host_pathlist_result"
+             ;;
+         esac
+         case "$1" in
+           *: ) func_append func_to_host_pathlist_result ";"
+             ;;
+         esac
+         ;;
+     esac
+   fi
+ }

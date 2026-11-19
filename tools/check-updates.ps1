@@ -20,6 +20,7 @@ $skip = @{
   expect = 'posix-env implementation'
   libsystre = 'local compatibility library'
   'posix-env' = 'this repository'
+  'posix-env-prepare' = 'this repository'
   scriptexe = 'this repository'
   tcl = 'Tcl 9 is incompatible; the recipe stays on Tcl 8.6'
 }

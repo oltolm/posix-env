@@ -1,0 +1,106 @@
+From a324cf9367a035a3aef00658efb8bbc9d765bdda Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Mon, 26 Oct 2026 22:56:36 +0100
+Subject: [PATCH] testsuite: Load the build-tree libgcc DLL on MinGW
+
+The testsuite looked for libgcc_s.dll, a name the MinGW DLL does not
+have, and used POSIX separators for native Windows PATH lists.  Tests
+loaded an older libgcc from the host toolchain and failed with
+0xC0000139.
+
+Look for the import library instead, install the DLL into the GCC
+build directory, and use native PATH separators with a native Windows
+Tcl.
+
+gcc/testsuite/ChangeLog:
+
+	* lib/gcc-defs.exp (gcc-set-multilib-library-path): Look for
+	libgcc_s.a on Cygwin and MinGW.
+	* lib/target-libpath.exp (windows_path_list): New proc.
+	(set_ld_library_path_env_vars): With a native Windows Tcl, convert
+	ld_library_path with windows_path_list and join it with ';'.
+
+libgcc/ChangeLog:
+
+	* Makefile.in (all): Pass SHLIB_DLLDIR=/ to install-leaf.
+
+diff --git a/gcc/testsuite/lib/gcc-defs.exp b/gcc/testsuite/lib/gcc-defs.exp
+index 191e2b83fe..32fbcc57db 100644
+--- a/gcc/testsuite/lib/gcc-defs.exp
++++ b/gcc/testsuite/lib/gcc-defs.exp
+@@ -479,8 +479,16 @@ proc gcc-set-multilib-library-path { compiler } {
+     set options [lrange $compiler 1 end]
+     set compiler [lindex $compiler 0]
+ 
++    # The libgcc DLL's name depends on the exception model
++    # (libgcc_s_seh-1.dll); its import library, next to it in the
++    # build tree, does not.
++    if { [istarget *-*-cygwin*] || [istarget *-*-mingw*] } {
++	set libgcc_s "libgcc_s.a"
++    } else {
++	set libgcc_s "libgcc_s.${shlib_ext}"
++    }
+     set libgcc_s_x [remote_exec host "$compiler" \
+-		    "$options -print-file-name=libgcc_s.${shlib_ext}"]
++		    "$options -print-file-name=$libgcc_s"]
+     if { [lindex $libgcc_s_x 0] == 0 \
+ 	 && [set libgcc_s_dir [file dirname [lindex $libgcc_s_x 1]]] != "" } {
+ 	set libpath ":${libgcc_s_dir}"
+diff --git a/gcc/testsuite/lib/target-libpath.exp b/gcc/testsuite/lib/target-libpath.exp
+index a983563fe8..dc80a23a23 100644
+--- a/gcc/testsuite/lib/target-libpath.exp
++++ b/gcc/testsuite/lib/target-libpath.exp
+@@ -43,6 +43,31 @@ proc set_gcc_exec_prefix_env_var { } {
+   }
+ }
+ 
++#######################################
++# proc windows_path_list { list }
++#######################################
++
++# Return the ':'-separated LIST of directories as a native Windows PATH
++# list, separated by ';'.  The directories are native Windows paths, so an
++# element of a single letter followed by one starting with '/' or '\' is
++# a drive letter, as in C:/src/build.
++
++proc windows_path_list { list } {
++  set parts [split $list ":"]
++  set result {}
++  for { set i 0 } { $i < [llength $parts] } { incr i } {
++    set part [lindex $parts $i]
++    set next [lindex $parts [expr { $i + 1 }]]
++    if { [regexp {^[A-Za-z]$} $part] && [regexp {^[/\\]} $next] } {
++      lappend result "$part:$next"
++      incr i
++    } elseif { $part ne "" } {
++      lappend result $part
++    }
++  }
++  return [join $result ";"]
++}
++
+ #######################################
+ # proc set_ld_library_path_env_vars { }
+ #######################################
+@@ -186,10 +211,19 @@ proc set_ld_library_path_env_vars { } {
+     }
+   }
+   if { [istarget *-*-cygwin*] || [istarget *-*-mingw*] } {
++    # A native Windows Tcl (not Cygwin's or MSYS's) sees PATH as a native
++    # list, separated by ';'.
++    if { $::tcl_platform(platform) eq "windows" } {
++      set path [windows_path_list $ld_library_path]
++      set sep ";"
++    } else {
++      set path $ld_library_path
++      set sep ":"
++    }
+     if { $orig_path_saved } {
+-      setenv PATH "$ld_library_path:$orig_path"
++      setenv PATH "$path$sep$orig_path"
+     } else {
+-      setenv PATH "$ld_library_path"
++      setenv PATH "$path"
+     }
+   }
+ 
