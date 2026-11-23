@@ -1,6 +1,6 @@
-From e63146fed697c0fc529ee9daa96c011bf0cd3f0e Mon Sep 17 00:00:00 2001
+From f286c6a5c0d5eae68800b56de279d4b5c25b2e85 Mon Sep 17 00:00:00 2001
 From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
-Date: Tue, 6 Oct 2026 19:25:10 +0200
+Date: Tue, 6 Oct 2026 19:23:40 +0200
 Subject: [PATCH] mktemp: print the name as the template gives it on Windows
 
 Path::join put a backslash between the template's directory and the
@@ -9,18 +9,18 @@ autoconf 2.59's config.status lost in eval (Tcl's configure).  The name
 is now the directory and template as given, with the separator they
 use.
 ---
- src/uu/mktemp/src/mktemp.rs  | 54 ++++++++++++++++++++++++++++++++++--
- tests/by-util/test_mktemp.rs | 19 +++++++++++++
- 2 files changed, 70 insertions(+), 3 deletions(-)
+ src/uu/mktemp/src/mktemp.rs  | 49 ++++++++++++++++++++++++++++++++++++
+ tests/by-util/test_mktemp.rs | 19 ++++++++++++++
+ 2 files changed, 68 insertions(+)
 
 diff --git a/src/uu/mktemp/src/mktemp.rs b/src/uu/mktemp/src/mktemp.rs
-index 887798c..8c9feb5 100644
+index 4d9cd0a12..182844b7c 100644
 --- a/src/uu/mktemp/src/mktemp.rs
 +++ b/src/uu/mktemp/src/mktemp.rs
-@@ -189,6 +189,14 @@ struct Params {
+@@ -182,6 +182,14 @@ struct Params {
  
      /// The (non-random) suffix of the temporary file.
-     suffix: String,
+     suffix: OsString,
 +
 +    /// The name to print up to the random characters: the directory and
 +    /// the template as given, joined with the separator they use.  On
@@ -28,37 +28,32 @@ index 887798c..8c9feb5 100644
 +    /// rest of "./confXXXXXX", which scripts that split at '/' or that
 +    /// `eval` the name cannot use.
 +    #[cfg(windows)]
-+    display_prefix: String,
++    display_prefix: OsString,
  }
  
  /// Find the start and end indices of the last contiguous block of Xs.
-@@ -289,7 +297,7 @@ impl Params {
-                 // return wrong results for hidden files like /tmp/.XXXXXXXX.
-                 // Use prefix_from_template directly instead.
-                 let directory = Path::new(&prefix_from_option)
--                    .join(&prefix_from_template[..prefix_from_template.len() - 1]); // strip trailing '.'
-+                    .join(&prefix_from_template[..prefix_from_template.len() - 1]); // strip trailing '.'\\'
- 
-                 let prefix = ".".to_string();
- 
-@@ -327,11 +335,30 @@ impl Params {
+@@ -301,11 +309,34 @@ impl Params {
          // random characters is four.
          let num_rand_chars = j - i;
  
 +        #[cfg(windows)]
 +        let display_prefix = match &tmpdir {
-+            None => prefix_from_template.to_string(),
++            None => prefix_from_template.to_os_string(),
 +            Some(dir) => {
-+                let dir = dir.to_string_lossy();
-+                if dir.is_empty() || dir.ends_with(['/', '\\']) {
-+                    format!("{dir}{prefix_from_template}")
-+                } else {
-+                    let uses_backslash = !dir.contains('/')
-+                        && !prefix_from_template.contains('/')
-+                        && (dir.contains('\\') || prefix_from_template.contains('\\'));
-+                    let sep = if uses_backslash { '\\' } else { '/' };
-+                    format!("{dir}{sep}{prefix_from_template}")
++                let mut display = dir.as_os_str().to_os_string();
++                let dir_bytes = dir.as_os_str().as_encoded_bytes();
++                let template_bytes = prefix_from_template.as_encoded_bytes();
++                if !dir_bytes.is_empty()
++                    && !dir_bytes.ends_with(b"/")
++                    && !dir_bytes.ends_with(b"\\")
++                {
++                    let uses_backslash = !dir_bytes.contains(&b'/')
++                        && !template_bytes.contains(&b'/')
++                        && (dir_bytes.contains(&b'\\') || template_bytes.contains(&b'\\'));
++                    display.push(if uses_backslash { "\\" } else { "/" });
 +                }
++                display.push(prefix_from_template);
++                display
 +            }
 +        };
 +
@@ -72,25 +67,7 @@ index 887798c..8c9feb5 100644
          })
      }
  }
-@@ -423,6 +450,8 @@ pub fn uumain(args: impl uucore::Args) -> UResult<()> {
-         prefix,
-         num_rand_chars: rand,
-         suffix,
-+        #[cfg(windows)]
-+        display_prefix,
-     } = Params::from(options)?;
- 
-     // Create the temporary file or directory, or simulate creating it.
-@@ -431,6 +460,8 @@ pub fn uumain(args: impl uucore::Args) -> UResult<()> {
-     } else {
-         exec(&tmpdir, &prefix, rand, &suffix, make_dir)
-     };
-+    #[cfg(windows)]
-+    let res = res.map(|path| display_name(&path, &prefix, &display_prefix));
- 
-     let res = if suppress_file_err {
-         // Mapping all UErrors to ExitCodes prevents the errors from being printed
-@@ -666,14 +697,31 @@ pub fn mktemp(options: &Options) -> UResult<PathBuf> {
+@@ -622,6 +653,8 @@ pub fn mktemp(options: &Options) -> UResult<PathBuf> {
          prefix,
          num_rand_chars: rand,
          suffix,
@@ -99,36 +76,34 @@ index 887798c..8c9feb5 100644
      } = Params::from(options.clone())?;
  
      // Create the temporary file or directory, or simulate creating it.
--    if options.dry_run {
-+    let res = if options.dry_run {
-         Ok(dry_exec(&tmpdir, &prefix, rand, &suffix))
-     } else {
+@@ -631,6 +664,22 @@ pub fn mktemp(options: &Options) -> UResult<PathBuf> {
          exec(&tmpdir, &prefix, rand, &suffix, options.directory)
--    }
-+    };
-+
-+    #[cfg(windows)]
-+    let res = res.map(|path| display_name(&path, &prefix, &display_prefix));
-+
-+    res
-+}
-+
-+/// The name to print for a created `path`, as the directory and template
-+/// were given: `display_prefix`, then the random characters and the suffix
-+/// (the file name after `prefix`).
-+#[cfg(windows)]
-+fn display_name(path: &Path, prefix: &str, display_prefix: &str) -> PathBuf {
-+    let name = path.file_name().unwrap_or_default().to_string_lossy();
-+    let random_and_suffix = name.strip_prefix(prefix).unwrap_or(&name);
-+    PathBuf::from(format!("{display_prefix}{random_and_suffix}"))
- }
+     };
  
- #[cfg(test)]
++    // Print the name as given: the directory and template prefix, then the
++    // random characters and the suffix of the name that was created.
++    #[cfg(windows)]
++    let res = res.map(|path| {
++        use std::os::windows::ffi::{OsStrExt, OsStringExt};
++
++        let name = path.file_name().unwrap_or_default();
++        let random_and_suffix: Vec<u16> = name
++            .encode_wide()
++            .skip(prefix.encode_wide().count())
++            .collect();
++        let mut display = display_prefix;
++        display.push(OsString::from_wide(&random_and_suffix));
++        PathBuf::from(display)
++    });
++
+     if options.quiet {
+         // Only creation failures are silenced; a bad template is still reported.
+         // Mapping the UError to an ExitCode prevents the error from being printed.
 diff --git a/tests/by-util/test_mktemp.rs b/tests/by-util/test_mktemp.rs
-index 7187b5b..5b146ff 100644
+index 9f652933c..f971e9bd4 100644
 --- a/tests/by-util/test_mktemp.rs
 +++ b/tests/by-util/test_mktemp.rs
-@@ -1269,3 +1269,22 @@ fn test_write_error_removes_the_temporary_directory() {
+@@ -1353,3 +1353,22 @@ fn test_write_error_removes_the_temporary_directory() {
          .collect();
      assert!(leftovers.is_empty(), "left behind: {leftovers:?}");
  }
@@ -152,5 +127,5 @@ index 7187b5b..5b146ff 100644
 +    assert!(at.file_exists(filename));
 +}
 -- 
-2.56.0.windows.1
+2.56.1.windows.1
 

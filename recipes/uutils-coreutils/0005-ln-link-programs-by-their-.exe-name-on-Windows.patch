@@ -1,4 +1,4 @@
-From b4727f143928e4dbd62fb431e6b9314d849c4f02 Mon Sep 17 00:00:00 2001
+From 3ef387d6c55c1f1c4e98912ca6e2e2c48ddf6678 Mon Sep 17 00:00:00 2001
 From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
 Date: Tue, 6 Oct 2026 22:56:42 +0200
 Subject: [PATCH] ln: link programs by their .exe name on Windows
@@ -16,10 +16,10 @@ its name.  Symbolic and hard links.
  2 files changed, 94 insertions(+)
 
 diff --git a/src/uu/ln/src/ln.rs b/src/uu/ln/src/ln.rs
-index e8ee356..d16d995 100644
+index ed7f6099e..ee2e6efb7 100644
 --- a/src/uu/ln/src/ln.rs
 +++ b/src/uu/ln/src/ln.rs
-@@ -393,6 +393,11 @@ fn is_same_entry(src: &Path, dst: &Path) -> bool {
+@@ -398,6 +398,11 @@ fn is_same_entry(src: &Path, dst: &Path) -> bool {
  /// This is made public to allow other apps to use `ln` as a library.
  #[allow(clippy::cognitive_complexity)]
  pub fn link(src: &Path, dst: &Path, settings: &Settings) -> LnResult<()> {
@@ -31,7 +31,7 @@ index e8ee356..d16d995 100644
      let mut backup_path = None;
      // Remove an existing destination only after a link attempt fails with EEXIST.
      let mut overwrite_on_conflict = false;
-@@ -515,6 +520,44 @@ pub fn link(src: &Path, dst: &Path, settings: &Settings) -> LnResult<()> {
+@@ -538,6 +543,44 @@ pub fn link(src: &Path, dst: &Path, settings: &Settings) -> LnResult<()> {
      Ok(())
  }
  
@@ -77,12 +77,12 @@ index e8ee356..d16d995 100644
  pub fn symlink<P1: AsRef<Path>, P2: AsRef<Path>>(src: P1, dst: P2) -> io::Result<()> {
      uucore::fs::symlink(src.as_ref(), dst.as_ref())
 diff --git a/tests/by-util/test_ln.rs b/tests/by-util/test_ln.rs
-index 9264e30..5435e64 100644
+index 2974bf1fa..a57a3961d 100644
 --- a/tests/by-util/test_ln.rs
 +++ b/tests/by-util/test_ln.rs
-@@ -1319,3 +1319,54 @@ fn test_hard_link_force_failed_link_keeps_destination() {
-     assert!(at.file_exists("dst"));
-     assert_eq!(at.read("dst"), "keep\n");
+@@ -1604,3 +1604,54 @@ fn test_hard_link_source_permission_denied() {
+         .stderr_only("ln: failed to access 'dir/x': Permission denied\n");
+     assert!(!at.file_exists("link"));
  }
 +
 +/// Windows: a link to program NAME, where only NAME.exe exists, links to
@@ -97,7 +97,7 @@ index 9264e30..5435e64 100644
 +    ucmd.args(&["-s", "../prog", "d/link"]).succeeds().no_stderr();
 +    assert!(!at.is_symlink("d/link"));
 +    assert!(at.is_symlink("d/link.exe"));
-+    assert_eq!(at.resolve_link("d/link.exe"), stored_target("../prog.exe"));
++    assert_eq!(at.resolve_link("d/link.exe"), r"..\prog.exe");
 +}
 +
 +/// Windows: a link named LINK.exe to NAME, where only NAME.exe exists
@@ -109,7 +109,7 @@ index 9264e30..5435e64 100644
 +    at.touch("prog.exe");
 +    at.mkdir("d");
 +    ucmd.args(&["-sf", "../prog", "d/as.exe"]).succeeds().no_stderr();
-+    assert_eq!(at.resolve_link("d/as.exe"), stored_target("../prog.exe"));
++    assert_eq!(at.resolve_link("d/as.exe"), r"..\prog.exe");
 +}
 +
 +/// Windows: a hard link to program NAME is LINK.exe as well.
@@ -136,5 +136,5 @@ index 9264e30..5435e64 100644
 +    assert_eq!(at.resolve_link("link"), "script");
 +}
 -- 
-2.56.0.windows.1
+2.56.1.windows.1
 

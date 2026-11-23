@@ -1,4 +1,6 @@
+From b95439585bc648dc85741132b3e791fcf76ab2a6 Mon Sep 17 00:00:00 2001
 From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Mon, 23 Nov 2026 18:11:33 +0100
 Subject: [PATCH] nohup: give the command a console without a window on Windows
 
 With DETACHED_PROCESS the command had no console, so every console
@@ -12,11 +14,11 @@ programs it starts share it.
  1 file changed, 8 insertions(+), 3 deletions(-)
 
 diff --git a/src/uu/nohup/src/platform/windows.rs b/src/uu/nohup/src/platform/windows.rs
-index 8ebe7576e..1e22b342c 100644
+index 72bae764d..5324cc158 100644
 --- a/src/uu/nohup/src/platform/windows.rs
 +++ b/src/uu/nohup/src/platform/windows.rs
-@@ -11,7 +11,7 @@ use std::process::{Command, Stdio};
- use thiserror::Error as ThisError;
+@@ -10,7 +10,7 @@ use std::os::windows::process::CommandExt as _;
+ use std::process::{Command, Stdio};
  use uucore::error::{UError, UResult};
  use uucore::translate;
 -use windows_sys::Win32::System::Threading::DETACHED_PROCESS;
@@ -24,7 +26,7 @@ index 8ebe7576e..1e22b342c 100644
  
  use crate::find_stdout;
  
-@@ -39,6 +39,11 @@ pub(crate) fn prepare() -> UResult<()> {
+@@ -38,6 +38,11 @@ pub(crate) fn prepare() -> UResult<()> {
  
  /// Spawn `command` detached from the console.
  ///
@@ -36,7 +38,7 @@ index 8ebe7576e..1e22b342c 100644
  /// Returns `None` once the child is running, or the error that made the spawn
  /// fail.
  pub(crate) fn run(command: &mut Command) -> UResult<Option<Error>> {
-@@ -63,7 +68,7 @@ pub(crate) fn run(command: &mut Command) -> UResult<Option<Error>> {
+@@ -62,7 +67,7 @@ pub(crate) fn run(command: &mut Command) -> UResult<Option<Error>> {
      } else if stderr_is_terminal {
          // stdout is already redirected, so follow it like the Unix side does
          // with `dup2_stderr(stdout())` rather than leaving stderr on the
@@ -45,7 +47,7 @@ index 8ebe7576e..1e22b342c 100644
          let dup: OwnedHandle = io::stdout()
              .as_handle()
              .try_clone_to_owned()
-@@ -71,7 +76,7 @@ pub(crate) fn run(command: &mut Command) -> UResult<Option<Error>> {
+@@ -70,7 +75,7 @@ pub(crate) fn run(command: &mut Command) -> UResult<Option<Error>> {
          command.stderr(Stdio::from(dup));
      }
  
@@ -54,3 +56,6 @@ index 8ebe7576e..1e22b342c 100644
          Ok(_) => Ok(None),
          Err(e) => Ok(Some(e)),
      }
+-- 
+2.56.1.windows.1
+

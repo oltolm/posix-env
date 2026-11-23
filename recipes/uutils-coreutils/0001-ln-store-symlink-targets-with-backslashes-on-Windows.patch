@@ -1,4 +1,4 @@
-From b4ed64221fc1c76758a32e9be17f44e4235bc54c Mon Sep 17 00:00:00 2001
+From c94bf6f0b2cde1287592d7aa0c1cfb0b5d8e9dac Mon Sep 17 00:00:00 2001
 From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
 Date: Thu, 1 Oct 2026 23:43:52 +0200
 Subject: [PATCH] ln: store symlink targets with backslashes on Windows
@@ -11,34 +11,73 @@ with "File exists"; binutils' ld does this for `.libs/ldscripts`.
 Convert `/` to `\` in the target before creating the link, both for a
 plain `ln -s` and for the replace path taken by `-f`.
 ---
- src/uu/ln/src/ln.rs               |  7 +----
- src/uucore/src/lib/features/fs.rs | 36 +++++++++++++++++++++----
- tests/by-util/test_ln.rs          | 44 ++++++++++++++++++++++++++++---
- 3 files changed, 73 insertions(+), 14 deletions(-)
+ src/uu/ln/src/ln.rs               | 43 +-----------------------
+ src/uucore/src/lib/features/fs.rs | 55 ++++++++++++++++++++++++++++---
+ tests/by-util/test_ln.rs          | 29 ++++++++++++++++
+ 3 files changed, 80 insertions(+), 47 deletions(-)
 
 diff --git a/src/uu/ln/src/ln.rs b/src/uu/ln/src/ln.rs
-index 8882965e5..57583835c 100644
+index 339f37d80..ed7f6099e 100644
 --- a/src/uu/ln/src/ln.rs
 +++ b/src/uu/ln/src/ln.rs
-@@ -517,12 +517,7 @@ pub fn link(src: &Path, dst: &Path, settings: &Settings) -> LnResult<()> {
+@@ -540,51 +540,10 @@ pub fn link(src: &Path, dst: &Path, settings: &Settings) -> LnResult<()> {
  
  #[cfg(windows)]
  pub fn symlink<P1: AsRef<Path>, P2: AsRef<Path>>(src: P1, dst: P2) -> io::Result<()> {
 -    use std::os::windows::fs::{symlink_dir, symlink_file};
--    if src.as_ref().is_dir() {
+-    // Windows does not resolve `/` inside a symlink target, so store it with `\`.
+-    let src = windows_link_target(src.as_ref());
+-    if src.is_dir() {
 -        symlink_dir(src, dst)
 -    } else {
 -        symlink_file(src, dst)
 -    }
+-}
+-
+-#[cfg(windows)]
+-fn windows_link_target(src: &Path) -> PathBuf {
+-    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+-    let wide: Vec<u16> = src
+-        .as_os_str()
+-        .encode_wide()
+-        .map(|c| {
+-            if c == u16::from(b'/') {
+-                u16::from(b'\\')
+-            } else {
+-                c
+-            }
+-        })
+-        .collect();
+-    PathBuf::from(OsString::from_wide(&wide))
 +    uucore::fs::symlink(src.as_ref(), dst.as_ref())
  }
  
  #[cfg(any(unix, target_os = "wasi"))]
+ pub fn symlink<P1: AsRef<Path>, P2: AsRef<Path>>(src: P1, dst: P2) -> io::Result<()> {
+     rustix::fs::symlink(src.as_ref(), dst.as_ref()).map_err(io::Error::from)
+ }
+-
+-#[cfg(all(test, windows))]
+-mod tests {
+-    use super::*;
+-
+-    #[test]
+-    fn link_target_uses_backslashes() {
+-        assert_eq!(
+-            windows_link_target(Path::new("test/dir/file")),
+-            PathBuf::from("test\\dir\\file")
+-        );
+-        assert_eq!(
+-            windows_link_target(Path::new("..\\up/mixed\\sep/file")),
+-            PathBuf::from("..\\up\\mixed\\sep\\file")
+-        );
+-    }
+-}
 diff --git a/src/uucore/src/lib/features/fs.rs b/src/uucore/src/lib/features/fs.rs
-index ee4feab59..40d858933 100644
+index 221d03873..9a8516f29 100644
 --- a/src/uucore/src/lib/features/fs.rs
 +++ b/src/uucore/src/lib/features/fs.rs
-@@ -1191,11 +1191,7 @@ fn create_link_std(target: &Path, dest: &Path, symbolic: bool) -> IOResult<()> {
+@@ -1243,11 +1243,7 @@ fn create_link_std(target: &Path, dest: &Path, symbolic: bool) -> IOResult<()> {
      }
      #[cfg(windows)]
      {
@@ -49,12 +88,29 @@ index ee4feab59..40d858933 100644
 -        }
 +        symlink(target, dest)
      }
-     #[cfg(not(windows))]
+     #[cfg(target_os = "redox")]
      {
-@@ -1203,6 +1199,36 @@ fn create_link_std(target: &Path, dest: &Path, symbolic: bool) -> IOResult<()> {
+@@ -1259,6 +1255,42 @@ fn create_link_std(target: &Path, dest: &Path, symbolic: bool) -> IOResult<()> {
      }
  }
  
++#[cfg(windows)]
++fn windows_link_target(src: &Path) -> PathBuf {
++    use std::os::windows::ffi::{OsStrExt, OsStringExt};
++    let wide: Vec<u16> = src
++        .as_os_str()
++        .encode_wide()
++        .map(|c| {
++            if c == u16::from(b'/') {
++                u16::from(b'\\')
++            } else {
++                c
++            }
++        })
++        .collect();
++    PathBuf::from(OsString::from_wide(&wide))
++}
++
 +/// Create a symbolic link at `dest` to `target`, as a directory link if
 +/// `target` is a directory.
 +///
@@ -66,18 +122,7 @@ index ee4feab59..40d858933 100644
 +/// Returns an error if the link cannot be created.
 +#[cfg(windows)]
 +pub fn symlink(target: &Path, dest: &Path) -> IOResult<()> {
-+    let wide: Vec<u16> = target
-+        .as_os_str()
-+        .encode_wide()
-+        .map(|c| {
-+            if c == u16::from(b'/') {
-+                u16::from(b'\\')
-+            } else {
-+                c
-+            }
-+        })
-+        .collect();
-+    let target = PathBuf::from(OsString::from_wide(&wide));
++    let target = windows_link_target(target);
 +    if target.is_dir() {
 +        std::os::windows::fs::symlink_dir(&target, dest)
 +    } else {
@@ -88,27 +133,31 @@ index ee4feab59..40d858933 100644
  #[cfg(test)]
  mod tests {
      // Note this useful idiom: importing names from outer (for mod tests) scope.
+@@ -1270,6 +1302,19 @@ mod tests {
+     #[cfg(unix)]
+     use tempfile::{NamedTempFile, tempdir};
+ 
++    #[cfg(windows)]
++    #[test]
++    fn link_target_uses_backslashes() {
++        assert_eq!(
++            windows_link_target(Path::new("test/dir/file")),
++            PathBuf::from("test\\dir\\file")
++        );
++        assert_eq!(
++            windows_link_target(Path::new("..\\up/mixed\\sep/file")),
++            PathBuf::from("..\\up\\mixed\\sep\\file")
++        );
++    }
++
+     // Keep fixtures outside the crate so Cargo's concurrent doctest/build-script
+     // scans cannot race their removal. WASI needs the preopened current directory
+     // because `std::env::temp_dir` aborts there.
 diff --git a/tests/by-util/test_ln.rs b/tests/by-util/test_ln.rs
-index ddd5e7046..043fccd5c 100644
+index 52e454369..2974bf1fa 100644
 --- a/tests/by-util/test_ln.rs
 +++ b/tests/by-util/test_ln.rs
-@@ -13,6 +13,15 @@ use uutests::new_ucmd;
- use uutests::util::TestScenario;
- use uutests::util_name;
- 
-+/// The target text `ln -s` stores for `target`: Windows resolves only `\`.
-+fn stored_target(target: &str) -> String {
-+    if cfg!(windows) {
-+        target.replace('/', "\\")
-+    } else {
-+        target.to_owned()
-+    }
-+}
-+
- #[test]
- fn test_invalid_arg() {
-     new_ucmd!().arg("--definitely-invalid").fails_with_code(1);
-@@ -71,6 +80,35 @@ fn test_symlink_dangling_directory() {
+@@ -98,6 +98,35 @@ fn test_symlink_dangling_directory() {
      assert_eq!(at.resolve_link(link), dir);
  }
  
@@ -144,29 +193,6 @@ index ddd5e7046..043fccd5c 100644
  #[test]
  fn test_symlink_circular() {
      let (at, mut ucmd) = at_and_ucmd!();
-@@ -530,11 +568,11 @@ fn test_symlink_target_dir_from_dir() {
- 
-     let file_a_link = &format!("{dir}/{filename_a}");
-     assert!(at.is_symlink(file_a_link));
--    assert_eq!(&at.resolve_link(file_a_link), file_a);
-+    assert_eq!(at.resolve_link(file_a_link), stored_target(file_a));
- 
-     let file_b_link = &format!("{dir}/{filename_b}");
-     assert!(at.is_symlink(file_b_link));
--    assert_eq!(&at.resolve_link(file_b_link), file_b);
-+    assert_eq!(at.resolve_link(file_b_link), stored_target(file_b));
- }
- 
- #[test]
-@@ -715,7 +753,7 @@ fn test_symlink_relative_path() {
-         .succeeds()
-         .stdout_only(format!("'{link}' -> '{}'\n", p.to_string_lossy()));
-     assert!(at.is_symlink(link));
--    assert_eq!(at.resolve_link(link), p.to_string_lossy());
-+    assert_eq!(at.resolve_link(link), stored_target(&p.to_string_lossy()));
- }
- 
- #[test]
 -- 
-2.56.0.windows.1
+2.56.1.windows.1
 
