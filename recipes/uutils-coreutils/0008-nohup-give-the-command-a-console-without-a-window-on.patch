@@ -1,0 +1,56 @@
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Subject: [PATCH] nohup: give the command a console without a window on Windows
+
+With DETACHED_PROCESS the command had no console, so every console
+program it started got a console of its own and opened a window: a
+detached shell running a build opened one per compiler and test.  Use
+CREATE_NO_WINDOW instead.  The command gets a console of its own with no
+window, which outlives closing the console nohup ran in, and the console
+programs it starts share it.
+---
+ src/uu/nohup/src/platform/windows.rs | 11 ++++++++---
+ 1 file changed, 8 insertions(+), 3 deletions(-)
+
+diff --git a/src/uu/nohup/src/platform/windows.rs b/src/uu/nohup/src/platform/windows.rs
+index 8ebe7576e..1e22b342c 100644
+--- a/src/uu/nohup/src/platform/windows.rs
++++ b/src/uu/nohup/src/platform/windows.rs
+@@ -11,7 +11,7 @@ use std::process::{Command, Stdio};
+ use thiserror::Error as ThisError;
+ use uucore::error::{UError, UResult};
+ use uucore::translate;
+-use windows_sys::Win32::System::Threading::DETACHED_PROCESS;
++use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
+ 
+ use crate::find_stdout;
+ 
+@@ -39,6 +39,11 @@ pub(crate) fn prepare() -> UResult<()> {
+ 
+ /// Spawn `command` detached from the console.
+ ///
++/// The child gets a console of its own with no window (`CREATE_NO_WINDOW`),
++/// so it outlives closing this one, and the console programs it starts share
++/// that hidden console. With `DETACHED_PROCESS` it would have none, and each
++/// console program it starts would open a console window of its own.
++///
+ /// Returns `None` once the child is running, or the error that made the spawn
+ /// fail.
+ pub(crate) fn run(command: &mut Command) -> UResult<Option<Error>> {
+@@ -63,7 +68,7 @@ pub(crate) fn run(command: &mut Command) -> UResult<Option<Error>> {
+     } else if stderr_is_terminal {
+         // stdout is already redirected, so follow it like the Unix side does
+         // with `dup2_stderr(stdout())` rather than leaving stderr on the
+-        // console, which a `DETACHED_PROCESS` child no longer has.
++        // console, which for the child is a hidden one nobody reads.
+         let dup: OwnedHandle = io::stdout()
+             .as_handle()
+             .try_clone_to_owned()
+@@ -71,7 +76,7 @@ pub(crate) fn run(command: &mut Command) -> UResult<Option<Error>> {
+         command.stderr(Stdio::from(dup));
+     }
+ 
+-    match command.creation_flags(DETACHED_PROCESS).spawn() {
++    match command.creation_flags(CREATE_NO_WINDOW).spawn() {
+         Ok(_) => Ok(None),
+         Err(e) => Ok(Some(e)),
+     }

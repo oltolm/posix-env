@@ -26,9 +26,12 @@ source:
     - 0006-pwd-realpath-readlink-print-paths-with-on-Windows.patch
     # ls -i needs the 64-bit file index from GetFileInformationByHandle.
     - 0007-ls-print-Windows-file-index-for-inode.patch
+    # nohup's DETACHED_PROCESS left the command without a console, so each
+    # console program it started opened a window of its own.
+    - 0008-nohup-give-the-command-a-console-without-a-window-on.patch
 
 build:
-  number: 11
+  number: 12
   script:
     interpreter: brush
     file: build.sh
