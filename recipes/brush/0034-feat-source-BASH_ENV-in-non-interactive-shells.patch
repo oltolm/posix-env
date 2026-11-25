@@ -1,0 +1,168 @@
+From 12b44707615366da70a6346e52f28387222b6f37 Mon Sep 17 00:00:00 2001
+From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Wed, 25 Nov 2026 04:08:56 +0100
+Subject: [PATCH] feat: source BASH_ENV in non-interactive shells
+
+A non-interactive shell with BASH_ENV set failed at startup with "not
+yet implemented", so a caller could not set up the environment of the
+scripts it runs.  As bash does, a non-interactive shell, login or not,
+now expands $BASH_ENV as in double quotes and sources the file it names
+if that exists; in posix mode, which sh mode implies, it reads no
+startup file, so ENV no longer fails either.
+
+Assisted-by: Claude Code:claude-opus-5-5
+---
+ brush-core/src/shell/initscripts.rs       | 37 ++++++-----
+ brush-shell/tests/cases/compat/basic.yaml | 78 +++++++++++++++++++++++
+ 2 files changed, 98 insertions(+), 17 deletions(-)
+
+diff --git a/brush-core/src/shell/initscripts.rs b/brush-core/src/shell/initscripts.rs
+index 5a65d5c6..c2a301e8 100644
+--- a/brush-core/src/shell/initscripts.rs
++++ b/brush-core/src/shell/initscripts.rs
+@@ -83,7 +83,7 @@ impl<SE: extensions::ShellExtensions> Shell<SE> {
+         if self.options.login_shell {
+             // --noprofile means skip this.
+             if matches!(profile_behavior, ProfileLoadBehavior::Skip) {
+-                return Ok(());
++                return self.source_bash_env(&params).await;
+             }
+ 
+             //
+@@ -143,25 +143,28 @@ impl<SE: extensions::ShellExtensions> Shell<SE> {
+                         }
+                     }
+                 }
+-            } else {
+-                let env_var_name = if self.options.sh_mode {
+-                    "ENV"
+-                } else {
+-                    "BASH_ENV"
+-                };
+-
+-                if self.env.is_set(env_var_name) {
+-                    //
+-                    // TODO(well-known-vars): look at $ENV/BASH_ENV; source its expansion if that
+-                    // file exists
+-                    //
+-                    return error::unimp(
+-                        "load config from $ENV/BASH_ENV for non-interactive, non-login shell",
+-                    );
+-                }
+             }
+         }
+ 
++        self.source_bash_env(&params).await
++    }
++
++    /// As bash does, a non-interactive shell, login or not, sources the expansion of
++    /// `$BASH_ENV`, expanded as in double quotes; in posix mode, which sh mode implies, it
++    /// reads no startup file.
++    async fn source_bash_env(
++        &mut self,
++        params: &interp::ExecutionParameters,
++    ) -> Result<(), error::Error> {
++        if self.options.interactive || self.options.posix_mode {
++            return Ok(());
++        }
++        if let Some(bash_env) = self.env_str("BASH_ENV").map(|v| v.into_owned()) {
++            let path = crate::expansion::basic_expand_heredoc_word(self, params, bash_env).await?;
++            if !path.is_empty() {
++                self.source_if_exists(path, params).await?;
++            }
++        }
+         Ok(())
+     }
+ }
+diff --git a/brush-shell/tests/cases/compat/basic.yaml b/brush-shell/tests/cases/compat/basic.yaml
+index 90030603..eb9d99e8 100644
+--- a/brush-shell/tests/cases/compat/basic.yaml
++++ b/brush-shell/tests/cases/compat/basic.yaml
+@@ -120,6 +120,84 @@ cases:
+     stdin: |
+       echo "Executing in main script body"
+ 
++  # A non-interactive bash sources $BASH_ENV, after expanding it; sh and posix
++  # mode don't (under the sh config, neither shell reads it in any case).
++  - name: "BASH_ENV is sourced before a script"
++    args: ["script.sh"]
++    env:
++      BASH_ENV: "envfile"
++    test_files:
++      - path: "envfile"
++        contents: |
++          echo "in envfile"
++          ENVVAR=set
++      - path: "script.sh"
++        contents: |
++          echo "ENVVAR=${ENVVAR-unset}"
++
++  - name: "BASH_ENV is sourced before a -c command"
++    args: ["-c", 'echo "ENVVAR=${ENVVAR-unset}"']
++    env:
++      BASH_ENV: "envfile"
++    test_files:
++      - path: "envfile"
++        contents: |
++          ENVVAR=set
++
++  - name: "BASH_ENV is sourced before commands from a pipe"
++    env:
++      BASH_ENV: "envfile"
++    test_files:
++      - path: "envfile"
++        contents: |
++          ENVVAR=set
++    stdin: |
++      echo "ENVVAR=${ENVVAR-unset}"
++
++  - name: "BASH_ENV is sourced by a non-interactive login shell"
++    args: ["-l", "-c", 'echo "ENVVAR=${ENVVAR-unset}"']
++    env:
++      BASH_ENV: "envfile"
++    test_files:
++      - path: "envfile"
++        contents: |
++          ENVVAR=set
++
++  - name: "BASH_ENV is expanded"
++    args: ["-c", 'echo "ENVVAR=${ENVVAR-unset}"']
++    env:
++      ENVDIR: "dir"
++      BASH_ENV: "$ENVDIR/$(echo envfile)"
++    test_files:
++      - path: "dir/envfile"
++        contents: |
++          ENVVAR=set
++
++  # Expanded as in double quotes: the backslash stays (a directory separator
++  # on Windows, part of the file name elsewhere).
++  - name: "BASH_ENV keeps backslashes"
++    args: ["-c", 'echo "ENVVAR=${ENVVAR-unset}"']
++    env:
++      BASH_ENV: 'dir\envfile'
++    test_files:
++      - path: 'dir\envfile'
++        contents: |
++          ENVVAR=set
++
++  - name: "BASH_ENV naming a missing file is ignored"
++    args: ["-c", 'echo "ENVVAR=${ENVVAR-unset}"']
++    env:
++      BASH_ENV: "no-such-envfile"
++
++  - name: "BASH_ENV is not sourced in posix mode"
++    args: ["--posix", "-c", 'echo "ENVVAR=${ENVVAR-unset}"']
++    env:
++      BASH_ENV: "envfile"
++    test_files:
++      - path: "envfile"
++        contents: |
++          ENVVAR=set
++
+   - name: "Unknown option"
+     ignore_stderr: true
+     args: ["--unknown-option", "-c", "echo hi"]
+-- 
+2.56.1.windows.1
+

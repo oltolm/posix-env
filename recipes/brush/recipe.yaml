@@ -42,12 +42,13 @@ source:
       - 0031-fix-measure-the-real-time-of-time-with-a-monotonic-c.patch
       - 0032-feat-windows-rm-and-cat-builtins.patch
       - 0033-fix-windows-reserve-an-8-MiB-main-thread-stack.patch
+      - 0034-feat-source-BASH_ENV-in-non-interactive-shells.patch
   - url: https://github.com/reubeno/brush/releases/download/brush-shell-v0.4.0/brush-docs.tar.gz
     sha256: 1070fa3a9470927c0c3d9c5417151f1b8f72317b42bed21f33e5fd4f3dad3332
     target_directory: docs
 
 build:
-  number: 12
+  number: 13
   script:
     interpreter: brush
     file: build.sh
@@ -79,6 +80,14 @@ tests:
         - sh -c "test \"$(type -t rm cat)\" = \"$(printf 'builtin\nbuiltin')\"" || exit /b 1
         - sh -c "printf 'here\n' > f && cat f - < f > g && rm -f f missing && test ! -e f && test \"$(cat g)\" = \"$(printf 'here\nhere')\"" || exit /b 1
         - sh -c "enable -n rm cat; case $(type -t rm cat) in *builtin*) exit 1;; esac" || exit /b 1
+        # A non-interactive shell sources $BASH_ENV, also as sh: brush takes no
+        # mode from its name.  Posix mode reads no startup file (patch 0034).
+        - sh -c "printf 'x=set\n' > envfile"
+        - set "BASH_ENV=%CD%\envfile"
+        - bash -c "test \"$x\" = set" || exit /b 1
+        - sh -c "test \"$x\" = set" || exit /b 1
+        - bash --posix -c "test -z \"$x\"" || exit /b 1
+        - set "BASH_ENV="
 
 about:
   homepage: https://github.com/reubeno/brush
