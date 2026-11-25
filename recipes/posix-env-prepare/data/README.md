@@ -20,8 +20,8 @@ source fixes are applied here.
 | `gcc-libgcc-build-directory-*` | Not yet submitted to GCC | Copy the libgcc DLL to the GCC build directory; accept both upstream and partially fixed sources |
 | `gcc-test-library-path` | Not yet submitted to GCC | Locate the MinGW import library and use native Windows PATH separators |
 | `gcc-target-tool-paths` | Not yet submitted to GCC | Look a bare `AS_FOR_TARGET`, `NM_FOR_TARGET` or `DSYMUTIL_FOR_TARGET` up in PATH: tested in the build directory, it matched the tool's exec-tool wrapper, which then exec'd itself once the testsuite put the build directory on PATH |
-| `binutils-lto-plugin` | binutils commit `7a9b6b59c2b4cd4801d58a0a5d966fa54dac42a6` | Find `liblto_plugin.dll` |
-| `binutils-bootstrap` | binutils commit `34d30f5b8aa9b84f70dea65e4d7d2bfbfcf17a75` | Use executable suffixes and omit libdl on Windows in the linker bootstrap tests |
+| `binutils-lto-plugin` | Not yet submitted to binutils | Find `liblto_plugin.dll` |
+| `binutils-bootstrap` | Not yet submitted to binutils | Use executable suffixes and omit libdl on Windows in the linker bootstrap tests |
 
 Project source versions are printed for diagnostics. Applicability is determined
 by exact hunk context, rather than assuming that every revision with a given
