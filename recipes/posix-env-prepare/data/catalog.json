@@ -72,6 +72,13 @@
       ]
     },
     {
+      "id": "gcc-target-tool-paths",
+      "project": "gcc",
+      "variants": [
+        "gcc-target-tool-paths.patch"
+      ]
+    },
+    {
       "id": "binutils-lto-plugin",
       "project": "binutils",
       "variants": [

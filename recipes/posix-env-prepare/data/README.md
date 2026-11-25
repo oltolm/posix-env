@@ -19,6 +19,7 @@ source fixes are applied here.
 | `gettext-source-directory-*` | brush patch 0015 | Recognize drive-letter source paths when generating `po/POTFILES` |
 | `gcc-libgcc-build-directory-*` | GCC commits `a8394f028bc8481558b502ea97240002a205cb0f` and `a324cf9367a035a3aef00658efb8bbc9d765bdda` from the maintained native Windows branch | Copy the libgcc DLL to the GCC build directory; accept both upstream and partially fixed sources |
 | `gcc-test-library-path` | GCC commit `a324cf9367a035a3aef00658efb8bbc9d765bdda`, testsuite files only | Locate the MinGW import library and use native Windows PATH separators |
+| `gcc-target-tool-paths` | Native Windows GCC branch, `gcc/configure.ac`; not yet committed there | Look a bare `AS_FOR_TARGET`, `NM_FOR_TARGET` or `DSYMUTIL_FOR_TARGET` up in PATH: tested in the build directory, it matched the tool's exec-tool wrapper, which then exec'd itself once the testsuite put the build directory on PATH |
 | `binutils-lto-plugin` | binutils commit `7a9b6b59c2b4cd4801d58a0a5d966fa54dac42a6` | Find `liblto_plugin.dll` |
 | `binutils-bootstrap` | binutils commit `34d30f5b8aa9b84f70dea65e4d7d2bfbfcf17a75` | Use executable suffixes and omit libdl on Windows in the linker bootstrap tests |
 

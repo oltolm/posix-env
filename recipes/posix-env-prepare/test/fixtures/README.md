@@ -5,6 +5,8 @@ never compiled by this test suite.
 
 - `gcc/`: GCC commit `a8394f028bc8481558b502ea97240002a205cb0f`'s parent,
   before the maintained libgcc and testsuite changes; GCC 17.0.0.
+  `gcc/gcc/configure.ac` and `gcc/gcc/configure` contain the as, nm and
+  dsymutil probes from the same revision.
 - `binutils/`: binutils commit `d10697b9257`; binutils 2.47.50, before the
   selected LTO plugin and linker bootstrap changes on this branch.
 - The `ltmain.sh` files contain complete selected functions from the Libtool

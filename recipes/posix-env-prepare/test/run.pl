@@ -100,6 +100,24 @@ for my $project (qw(gcc binutils)) {
         like(read_file("$tree/libgcc/Makefile.in"), qr/SHLIB_DLLDIR=\//, 'libgcc DLL copied to build directory');
         like(read_file("$tree/gcc/testsuite/lib/target-libpath.exp"), qr/set sep ";"/, 'native test PATH separator');
         like(read_file("$tree/gcc/testsuite/lib/gcc-defs.exp"), qr/set libgcc_s "libgcc_s\.a"/, 'test driver locates MinGW import library');
+        for my $file (qw(configure.ac configure)) {
+            my $text = read_file("$tree/gcc/$file");
+            unlike($text, qr/set dummy \$\w+; test -x/, "gcc/$file tests no bare tool name");
+            is(scalar(() = $text =~ /\*\/\* \| \*\\\\\*\) test -x/g), 4, "gcc/$file tests only tool paths");
+        }
+        # The build directory holds the nm exec-tool wrapper.  The bare name
+        # passed by the top-level Makefile must be searched for in PATH.
+        my ($condition) = read_file("$tree/gcc/configure") =~ /^elif (\( set dummy \$NM_FOR_TARGET\b.*?\)); then$/ms;
+        ok(defined $condition, 'nm probe found in gcc/configure');
+        make_path("$scratch/nm-probe");
+        write_file("$scratch/nm-probe/nm", "#! /bin/sh\nexec nm \"\$\@\"\n");
+        ($status, $output) = run_shell(<<SH);
+cd '$scratch/nm-probe' || exit 1
+for NM_FOR_TARGET in 'nm  ' "\$PWD/nm"; do
+  if $condition; then echo direct; else echo search; fi
+done
+SH
+        is($output, "search\ndirect\n", 'nm probe searches PATH for a bare name and takes a path directly');
     } else {
         like(read_file("$tree/ld/testsuite/config/default.exp"), qr/^\tliblto_plugin\.dll$/m, 'native LTO plugin discovered');
         like(read_file("$tree/ld/testsuite/ld-bootstrap/bootstrap.exp"), qr/!\[istarget "\*-\*-mingw\*"\]/, 'bootstrap omits libdl on MinGW');

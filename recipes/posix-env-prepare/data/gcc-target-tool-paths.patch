@@ -1,0 +1,81 @@
+Subject: Do not take the exec-tool wrappers for the target tools
+Origin: native Windows GCC branch, gcc/configure.ac (not yet committed)
+
+--- a/gcc/configure
++++ b/gcc/configure
+@@ -25533,7 +25533,11 @@ elif test -f $gcc_cv_as_gas_srcdir/configure.ac \
+ elif test -x as$build_exeext; then
+ 	# Build using assembler in the current directory.
+ 	gcc_cv_as=./as$build_exeext
+-elif ( set dummy $AS_FOR_TARGET; test -x $2 ); then
++elif ( set dummy $AS_FOR_TARGET
++       # Test only a path: a bare name would be found in the build
++       # directory, where it can be the exec-tool wrapper generated below,
++       # and the wrapper would then exec itself.
++       case $2 in */* | *\\*) test -x $2 ;; *) false ;; esac ); then
+         gcc_cv_as="$AS_FOR_TARGET"
+ else
+         # Extract the first word of "$AS_FOR_TARGET", so it can be a program name with args.
+@@ -25966,7 +25970,8 @@ if test -f $gcc_cv_binutils_srcdir/configure.ac \
+ 	gcc_cv_nm=../binutils/nm-new$build_exeext
+ elif test -x nm$build_exeext; then
+ 	gcc_cv_nm=./nm$build_exeext
+-elif ( set dummy $NM_FOR_TARGET; test -x $2 ); then
++elif ( set dummy $NM_FOR_TARGET
++       case $2 in */* | *\\*) test -x $2 ;; *) false ;; esac ); then
+         gcc_cv_nm="$NM_FOR_TARGET"
+ else
+         # Extract the first word of "$NM_FOR_TARGET", so it can be a program name with args.
+@@ -26250,9 +26255,11 @@ if test -x "$DEFAULT_DSYMUTIL"; then
+     gcc_cv_dsymutil="$DEFAULT_DSYMUTIL"
+ elif test -x dsymutil$build_exeext; then
+     gcc_cv_dsymutil=./dsymutil$build_exeext
+-elif ( set dummy $DSYMUTIL_FOR_TARGET; test -x $2 ); then
++elif ( set dummy $DSYMUTIL_FOR_TARGET
++       case $2 in */* | *\\*) test -x $2 ;; *) false ;; esac ); then
+     gcc_cv_dsymutil=$DSYMUTIL_FOR_TARGET
+-elif ( set dummy $DSYMUTIL; test -x $2 ); then
++elif ( set dummy $DSYMUTIL
++       case $2 in */* | *\\*) test -x $2 ;; *) false ;; esac ); then
+     gcc_cv_dsymutil=$DSYMUTIL
+ else
+     # Extract the first word of "$DSYMUTIL_FOR_TARGET", so it can be a program name with args.
+--- a/gcc/configure.ac
++++ b/gcc/configure.ac
+@@ -2672,7 +2672,11 @@ elif test -f $gcc_cv_as_gas_srcdir/configure.ac \
+ elif test -x as$build_exeext; then
+ 	# Build using assembler in the current directory.
+ 	gcc_cv_as=./as$build_exeext
+-elif ( set dummy $AS_FOR_TARGET; test -x $[2] ); then
++elif ( set dummy $AS_FOR_TARGET
++       # Test only a path: a bare name would be found in the build
++       # directory, where it can be the exec-tool wrapper generated below,
++       # and the wrapper would then exec itself.
++       case $[2] in */* | *\\*) test -x $[2] ;; *) false ;; esac ); then
+         gcc_cv_as="$AS_FOR_TARGET"
+ else
+         AC_PATH_PROG(gcc_cv_as, $AS_FOR_TARGET)
+@@ -2987,7 +2991,8 @@ if test -f $gcc_cv_binutils_srcdir/configure.ac \
+ 	gcc_cv_nm=../binutils/nm-new$build_exeext
+ elif test -x nm$build_exeext; then
+ 	gcc_cv_nm=./nm$build_exeext
+-elif ( set dummy $NM_FOR_TARGET; test -x $[2] ); then
++elif ( set dummy $NM_FOR_TARGET
++       case $[2] in */* | *\\*) test -x $[2] ;; *) false ;; esac ); then
+         gcc_cv_nm="$NM_FOR_TARGET"
+ else
+         AC_PATH_PROG(gcc_cv_nm, $NM_FOR_TARGET)
+@@ -3084,9 +3089,11 @@ if test -x "$DEFAULT_DSYMUTIL"; then
+     gcc_cv_dsymutil="$DEFAULT_DSYMUTIL"
+ elif test -x dsymutil$build_exeext; then
+     gcc_cv_dsymutil=./dsymutil$build_exeext
+-elif ( set dummy $DSYMUTIL_FOR_TARGET; test -x $[2] ); then
++elif ( set dummy $DSYMUTIL_FOR_TARGET
++       case $[2] in */* | *\\*) test -x $[2] ;; *) false ;; esac ); then
+     gcc_cv_dsymutil=$DSYMUTIL_FOR_TARGET
+-elif ( set dummy $DSYMUTIL; test -x $[2] ); then
++elif ( set dummy $DSYMUTIL
++       case $[2] in */* | *\\*) test -x $[2] ;; *) false ;; esac ); then
+     gcc_cv_dsymutil=$DSYMUTIL
+ else
+     AC_PATH_PROG(gcc_cv_dsymutil, $DSYMUTIL_FOR_TARGET)
