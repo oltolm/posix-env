@@ -1,5 +1,5 @@
 Subject: Copy the Windows libgcc DLL into the GCC build directory
-Origin: GCC commits a8394f028b and a324cf9367
+Origin: not yet submitted to GCC
 
 --- a/libgcc/Makefile.in
 +++ b/libgcc/Makefile.in

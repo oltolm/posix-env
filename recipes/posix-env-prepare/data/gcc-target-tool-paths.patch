@@ -1,5 +1,5 @@
 Subject: Do not take the exec-tool wrappers for the target tools
-Origin: native Windows GCC branch, gcc/configure.ac (not yet committed)
+Origin: not yet submitted to GCC
 
 --- a/gcc/configure
 +++ b/gcc/configure
