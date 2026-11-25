@@ -17,7 +17,7 @@ source fixes are applied here.
 | `libtool-wrapper-executable` | brush patch 0026 | Find the wrapper through `_pgmptr` instead of potentially extensionless `argv[0]` |
 | `libtool-wrapper-symlinks` | brush patch 0027 | Resolve the wrapper's final Windows path through symbolic links |
 | `gettext-source-directory-*` | brush patch 0015 | Recognize drive-letter source paths when generating `po/POTFILES` |
-| `gcc-libgcc-build-directory-*` | Not yet submitted to GCC | Copy the libgcc DLL to the GCC build directory; accept both upstream and partially fixed sources |
+| `gcc-libgcc-build-directory` | Not yet submitted to GCC | Install the libgcc DLL in the GCC build directory, not under `$(bindir)` there |
 | `gcc-test-library-path` | Not yet submitted to GCC | Locate the MinGW import library and use native Windows PATH separators |
 | `gcc-target-tool-paths` | Not yet submitted to GCC | Look a bare `AS_FOR_TARGET`, `NM_FOR_TARGET` or `DSYMUTIL_FOR_TARGET` up in PATH: tested in the build directory, it matched the tool's exec-tool wrapper, which then exec'd itself once the testsuite put the build directory on PATH |
 | `binutils-lto-plugin` | Not yet submitted to binutils | Find `liblto_plugin.dll` |

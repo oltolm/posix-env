@@ -98,6 +98,7 @@ for my $project (qw(gcc binutils)) {
     like(read_file("$tree/configure"), qr/\[A-Za-z\]:/, 'generated configure accepts drive paths');
     if ($project eq 'gcc') {
         like(read_file("$tree/libgcc/Makefile.in"), qr/SHLIB_DLLDIR=\//, 'libgcc DLL copied to build directory');
+        unlike(read_file("$tree/libgcc/Makefile.in"), qr/bindir=|toolexeclibdir=/, 'libgcc install-leaf overrides only SHLIB_DLLDIR');
         like(read_file("$tree/gcc/testsuite/lib/target-libpath.exp"), qr/set sep ";"/, 'native test PATH separator');
         like(read_file("$tree/gcc/testsuite/lib/gcc-defs.exp"), qr/set libgcc_s "libgcc_s\.a"/, 'test driver locates MinGW import library');
         for my $file (qw(configure.ac configure)) {
@@ -210,13 +211,6 @@ $before = snapshot($ambiguous);
 isnt($status, 0, 'ambiguous repeated context rejected');
 is_deeply(snapshot($ambiguous), $before, 'ambiguous context prevents all writes');
 
-my $partial = fixture('gcc', 'partial');
-$modified = read_file("$partial/libgcc/Makefile.in");
-$modified =~ s/slibdir= libsubdir= MULTIOSDIR=/slibdir= libsubdir= bindir= toolexeclibdir= MULTIOSDIR=/ or die 'fixture drift';
-write_file("$partial/libgcc/Makefile.in", $modified);
-($status, $output) = run_prepare($partial);
-is($status, 0, 'earlier libgcc fix accepted');
-like(read_file("$partial/libgcc/Makefile.in"), qr/SHLIB_DLLDIR=\//, 'remaining libgcc fix applied');
 
 my $readonly = fixture('gcc', 'readonly');
 chmod 0444, "$readonly/libgcc/Makefile.in" or die $!;

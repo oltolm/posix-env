@@ -60,8 +60,7 @@
       "id": "gcc-libgcc-build-directory",
       "project": "gcc",
       "variants": [
-        "gcc-libgcc-build-directory-upstream.patch",
-        "gcc-libgcc-build-directory-bindir.patch"
+        "gcc-libgcc-build-directory.patch"
       ]
     },
     {
