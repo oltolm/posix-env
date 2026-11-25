@@ -82,6 +82,16 @@ build RECIPE [RECIPE...] [-- rattler-build options]
 use only packages already present in the local channel; they do not fall back
 to conda-forge.
 
+Install or update packages from the local channel in an environment:
+
+```console
+install PACKAGE [PACKAGE...] [-- micromamba options]
+```
+
+`POSIX_ENV_PREFIX` selects the environment (default `%USERPROFILE%\posix-env`).
+A package in `output\` is taken only from there; other dependencies come from
+the environment's channel.
+
 Check all recipes (or selected recipe names) for newer stable upstream
 releases with:
 
