@@ -15,7 +15,7 @@ source:
   - path: binmode.c
 
 build:
-  number: 33
+  number: 34
   script:
     interpreter: brush
     content:
@@ -30,6 +30,8 @@ build:
       - gcc -O2 -municode -o "$PREFIX/bin/perlsh.exe" perlsh.c
       - cp "$RECIPE_DIR/config.site" "$PREFIX/share/posix-env/"
       - cp "$RECIPE_DIR/activate.bat" "$PREFIX/etc/conda/activate.d/posix-env.bat"
+      # The same activation for a bash started outside the environment.
+      - cp "$RECIPE_DIR/activate.sh" "$PREFIX/share/posix-env/"
       - cp "$RECIPE_DIR/deactivate.bat" "$PREFIX/etc/conda/deactivate.d/posix-env.bat"
       # posix-env install NAME and the launcher's other commands in the shell.
       - cp "$RECIPE_DIR/posix-env" "$PREFIX/bin/posix-env"
@@ -56,7 +58,10 @@ requirements:
     - micromamba
 
 tests:
-  - requirements:
+  - files:
+      recipe:
+        - test/
+    requirements:
       run:
         - autoconf
         - gettext-runtime
@@ -76,6 +81,7 @@ tests:
         - sh -c "echo a b | awk '{ print $2 }' | grep -q b" || exit /b 1
         - sh -c "printf 'x\n' | sed s/x/y/ | tr y z | grep -qx z" || exit /b 1
         - sh -c "test -n \"$CONFIG_SITE\" && test -f \"$CONFIG_SITE\"" || exit /b 1
+        - sh test/bash-env.sh || exit /b 1
         # Read again by a nested configure, config.site adds nothing twice.
         - sh -c ". \"$CONFIG_SITE\"; l=$LDFLAGS c=$CPPFLAGS; . \"$CONFIG_SITE\"; test \"$l\" = \"$LDFLAGS\" && test \"$c\" = \"$CPPFLAGS\"" || exit /b 1
         # Programs that configure links get the UTF-8 manifest.

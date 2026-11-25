@@ -79,6 +79,29 @@ The shell's `PATH` is the environment's `bin`, the toolchain, `System32` and
 `Windows`, git, then `POSIX_ENV_EXTRA_PATH`; the Windows `PATH` is not
 inherited, so build scripts find no other `grep`, `sed` or `perl`.
 
+### Without the launcher
+
+A program that does not run commands through cmd, such as a coding agent
+whose shell is PowerShell, starts the environment's bash directly, with
+`BASH_ENV` naming the environment's `share/posix-env/activate.sh`:
+
+```powershell
+$env:BASH_ENV = 'C:/Users/me/posix-env/share/posix-env/activate.sh'
+C:/Users/me/posix-env/bin/bash.exe build.sh
+```
+
+For an agent, set `BASH_ENV` once in its environment settings. Every
+non-interactive bash sources the file before it runs its script or `-c`
+command; the file sets the `PATH` of `posix-env run` and the variables of
+the activation (below), from the same `POSIX_ENV_TOOLCHAIN`, `POSIX_ENV_GIT`
+and `POSIX_ENV_EXTRA_PATH`. The shells that the script starts inherit the
+environment and leave it alone. `sh.exe` reads `BASH_ENV` too, because brush
+takes no mode from its name; `--posix` reads no startup file.
+
+Write the commands to a script file and pass its path: a `-c` command loses
+its quotes on the way through PowerShell. The console code page is not
+switched to UTF-8, which matters only for output shown on a console.
+
 The toolchain (gcc, binutils, mingw-w64) is not packaged. Any MinGW-w64 UCRT
 toolchain works; MSYS2's UCRT64 one is the default.
 
@@ -199,6 +222,10 @@ micromamba runs on activation (`micromamba run`, `micromamba activate`):
 
 It also switches the console to code page 65001. Deactivation undoes all of
 this, including the code page.
+
+`share\posix-env\activate.sh` sets the same variables and the launcher's
+`PATH` for a bash started without the launcher (above). Both files list the
+variables; the posix-env package's test compares what they set.
 
 ### config.site
 
