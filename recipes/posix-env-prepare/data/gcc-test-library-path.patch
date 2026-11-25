@@ -8,9 +8,8 @@ have, and used POSIX separators for native Windows PATH lists.  Tests
 loaded an older libgcc from the host toolchain and failed with
 0xC0000139.
 
-Look for the import library instead, install the DLL into the GCC
-build directory, and use native PATH separators with a native Windows
-Tcl.
+Look for the import library instead, and use native PATH separators
+with a native Windows Tcl.
 
 gcc/testsuite/ChangeLog:
 
@@ -19,10 +18,6 @@ gcc/testsuite/ChangeLog:
 	* lib/target-libpath.exp (windows_path_list): New proc.
 	(set_ld_library_path_env_vars): With a native Windows Tcl, convert
 	ld_library_path with windows_path_list and join it with ';'.
-
-libgcc/ChangeLog:
-
-	* Makefile.in (all): Pass SHLIB_DLLDIR=/ to install-leaf.
 
 diff --git a/gcc/testsuite/lib/gcc-defs.exp b/gcc/testsuite/lib/gcc-defs.exp
 index 191e2b83fe..32fbcc57db 100644
