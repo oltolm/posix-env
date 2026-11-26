@@ -15,7 +15,7 @@ source:
   - path: binmode.c
 
 build:
-  number: 34
+  number: 35
   script:
     interpreter: brush
     content:
@@ -44,7 +44,8 @@ requirements:
   build:
     - posix-env
   run:
-    - brush
+    # BASH_ENV activation requires patch 0034, included in our 0.5.0 package.
+    - brush >=0.5.0
     - uutils-coreutils
     - uutils-findutils
     - uutils-grep
@@ -64,6 +65,7 @@ tests:
     requirements:
       run:
         - autoconf
+        - diffutils
         - gettext-runtime
     script:
       interpreter: cmd

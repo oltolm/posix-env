@@ -46,7 +46,7 @@ source:
     target_directory: docs
 
 build:
-  number: 0
+  number: 1
   script:
     interpreter: brush
     file: build.sh

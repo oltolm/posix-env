@@ -106,7 +106,9 @@ scheduled automation. Lookup failures return exit code 2.
 GitHub Actions builds recipe directories changed by pushes to `master` or by
 pull requests. A manual run accepts a space- or comma-separated recipe list.
 Each clean build uses the published posix-env channel for build dependencies
-and retains its resulting packages as a workflow artifact for 14 days. After
+and retains its resulting packages as a workflow artifact for 14 days. When
+brush and posix-env are both selected, CI builds brush first on the same
+runner so posix-env's tests use the new shell. After
 a successful `master` build, CI adds only the new immutable package files to
 the rolling channel and refreshes its indexes.
 

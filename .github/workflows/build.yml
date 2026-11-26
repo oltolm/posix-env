@@ -73,7 +73,19 @@ jobs:
             }
           }
 
-          $json = ConvertTo-Json -InputObject @($selected) -Compress
+          # posix-env needs the new brush at test time. When both change,
+          # build them on one runner so the local channel contains it.
+          $buildBrushFirst = 'brush' -in $selected -and 'posix-env' -in $selected
+          if ($buildBrushFirst) {
+            $selected = @($selected | Where-Object { $_ -ne 'brush' })
+          }
+          $matrix = @($selected | ForEach-Object {
+            @{
+              recipe = $_
+              build_brush_first = $buildBrushFirst -and $_ -eq 'posix-env'
+            }
+          })
+          $json = ConvertTo-Json -InputObject $matrix -Compress
           $changedJson = ConvertTo-Json -InputObject @($recipeChanges) -Compress
           "recipes=$json" >> $env:GITHUB_OUTPUT
           "count=$($selected.Count)" >> $env:GITHUB_OUTPUT
@@ -92,7 +104,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        recipe: ${{ fromJSON(needs.select.outputs.recipes) }}
+        include: ${{ fromJSON(needs.select.outputs.recipes) }}
     steps:
       - uses: actions/checkout@v5
 
@@ -125,6 +137,13 @@ jobs:
       - name: Download pinned build tools
         shell: powershell
         run: tools\fetch.ps1
+
+      - name: Build brush before posix-env
+        if: matrix.build_brush_first
+        shell: cmd
+        env:
+          POSIX_ENV_BOOTSTRAP_CHANNEL: https://oltolm.github.io/posix-env/channel
+        run: build.cmd brush
 
       - name: Build ${{ matrix.recipe }}
         shell: cmd
