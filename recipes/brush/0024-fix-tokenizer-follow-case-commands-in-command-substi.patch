@@ -1,6 +1,6 @@
-From df0166ba4701bb68df31e6476dc21c80fd25229c Mon Sep 17 00:00:00 2001
+From 1270d852d332932587b08f6a92b1765582a23cf8 Mon Sep 17 00:00:00 2001
 From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
-Date: Mon, 5 Oct 2026 18:14:29 +0200
+Date: Thu, 26 Nov 2026 14:35:10 +0100
 Subject: [PATCH] fix(tokenizer): follow case commands in command substitutions
 
 In `$(case x in x) echo a;; esac)`, the `)` ending the case item's
@@ -10,15 +10,18 @@ the `case` commands in its contents: `case` and `esac` where they are
 reserved words, `in`, and the patterns, whose `(` and `)` delimit them
 rather than pair with each other.  Every token passes through
 delimit_current_token once, in order, so the tracking is fed from there.
+
+Rebased for brush 0.5.0.
+Assisted-by: Codex:GPT-6
 ---
  brush-parser/src/tokenizer.rs | 166 ++++++++++++++++++++++++++++++++++
  1 file changed, 166 insertions(+)
 
 diff --git a/brush-parser/src/tokenizer.rs b/brush-parser/src/tokenizer.rs
-index c9e66e18..7f486b52 100644
+index f765202a..bfcf5a8f 100644
 --- a/brush-parser/src/tokenizer.rs
 +++ b/brush-parser/src/tokenizer.rs
-@@ -330,6 +330,123 @@ struct ExpansionFrame {
+@@ -335,6 +335,123 @@ struct ExpansionFrame {
      /// arithmetic expansion's contents, `<<` is always a shift; see
      /// [`NestedExpansion::is_arithmetic`].)
      arithmetic_command_parens: usize,
@@ -142,7 +145,7 @@ index c9e66e18..7f486b52 100644
  }
  
  impl ExpansionFrame {
-@@ -340,6 +457,10 @@ impl ExpansionFrame {
+@@ -345,6 +462,10 @@ impl ExpansionFrame {
          let Some(expansion) = self.expansion else {
              return;
          };
@@ -153,7 +156,7 @@ index c9e66e18..7f486b52 100644
          if expansion.opening_char() == Some(c) {
              self.closers_needed += 1;
          } else if expansion.closing_char() == c {
-@@ -506,6 +627,17 @@ impl TokenParseState {
+@@ -511,6 +632,17 @@ impl TokenParseState {
              }));
          }
  
@@ -171,7 +174,7 @@ index c9e66e18..7f486b52 100644
          let current_here_state = std::mem::take(&mut cross_token_state.frame.here_state);
          match current_here_state {
              HereState::NextTokenIsHereTag { remove_tabs } => {
-@@ -1220,6 +1352,7 @@ impl<'a, R: ?Sized + std::io::BufRead> Tokenizer<'a, R> {
+@@ -1319,6 +1451,7 @@ impl<'a, R: ?Sized + std::io::BufRead> Tokenizer<'a, R> {
                  && !state.in_operator()
                  && closing_char == Some(c)
                  && self.cross_state.frame.closers_needed == 1
@@ -179,7 +182,7 @@ index c9e66e18..7f486b52 100644
              {
                  let reason = if state.started_token() {
                      TokenEndReason::Other
-@@ -2217,6 +2350,39 @@ HERE2
+@@ -2481,6 +2614,39 @@ HERE2
              command_substitution_body("echo $(cat <<EOF)) rest\n", &options)?,
              "echo $(cat <<EOF)"
          );
@@ -219,6 +222,3 @@ index c9e66e18..7f486b52 100644
          // A quoted `)` in an extglob closes neither the pattern nor the command.
          assert_eq!(
              command_substitution_body(r#"printf "%s" @(")")) rest"#, &options)?,
--- 
-2.56.0.windows.1
-

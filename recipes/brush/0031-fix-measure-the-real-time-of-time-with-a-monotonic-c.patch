@@ -1,4 +1,6 @@
+From cf4fa885ea8e94215543228c577ea5f692fd33b9 Mon Sep 17 00:00:00 2001
 From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Thu, 26 Nov 2026 14:35:11 +0100
 Subject: [PATCH] fix: measure the real time of time with a monotonic clock
 
 The time keyword measured real time with SystemTime, which jumps when
@@ -6,11 +8,15 @@ the system clock is set.  Use Instant instead: QueryPerformanceCounter
 on Windows, CLOCK_MONOTONIC on Unix.
 
 Assisted-by: Claude Code:claude-opus-5-5
+
+Rebased for brush 0.5.0.
+Assisted-by: Codex:GPT-6
 ---
  brush-core/src/timing.rs | 14 +++++++-------
  1 file changed, 7 insertions(+), 7 deletions(-)
 
 diff --git a/brush-core/src/timing.rs b/brush-core/src/timing.rs
+index 7f6751e1..dd72f8b8 100644
 --- a/brush-core/src/timing.rs
 +++ b/brush-core/src/timing.rs
 @@ -3,7 +3,7 @@

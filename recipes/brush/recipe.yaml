@@ -1,17 +1,18 @@
-# A snapshot of brush's development branch: the Windows fixes need code
-# from after the 0.4.0 release. Retained patches numbered 0001-0018 come from
+# Retained patches numbered 0001-0018 originated in
 # MSYS2's mingw-w64-brush patch series. Libtool/gettext source fixes formerly
 # supplied by patches 0015, 0021, 0026, and 0027 live in posix-env-prepare.
+# 0.5.0 includes the fixes from 0007, 0014, and 0017. Patch 0025 now retains
+# only its regression test: upstream resolves executable extensions itself.
 context:
-  commit: 8b539ddbb0b265d2703d841b48933d6de601cfc2
+  version: 0.5.0
 
 package:
   name: brush
-  version: 0.4.0.post177
+  version: ${{ version }}
 
 source:
-  - url: https://github.com/reubeno/brush/archive/${{ commit }}.tar.gz
-    sha256: 499251a450aa4165aea0cb69cb11a15b81b4332d9cb8a520e1b4c896fbab17fe
+  - url: https://github.com/reubeno/brush/archive/refs/tags/brush-shell-v${{ version }}.tar.gz
+    sha256: c55a57d399112d5509b17518e756acb613886702bccfe9243ba2020a664fc066
     patches:
       - 0001-fix-windows-don-t-refuse-to-spawn-commands-while-fds.patch
       - 0002-feat-windows-enable-the-exec-builtin.patch
@@ -19,16 +20,13 @@ source:
       - 0004-feat-windows-run-scripts-through-their-interpreter.patch
       - 0005-fix-windows-treat-directories-as-executable-in-test-.patch
       - 0006-feat-windows-accept-POSIX-signal-names-and-numbers-i.patch
-      - 0007-fix-run-compound-pipeline-stages-concurrently.patch
       - 0008-fix-don-t-deadlock-on-here-docs-larger-than-the-pipe.patch
       - 0009-feat-windows-add-the-umask-builtin.patch
       - 0010-fix-windows-convert-CRLF-to-LF-in-command-substituti.patch
       - 0011-fix-parser-remove-backslashes-inside-backquotes-as-P.patch
       - 0012-fix-windows-join-PATH-entries-and-command-names-with.patch
       - 0013-fix-windows-quote-wildcard-arguments-passed-to-nativ.patch
-      - 0014-fix-run-function-calls-in-pipelines-concurrently.patch
       - 0016-feat-windows-implement-test-ef.patch
-      - 0017-fix-pass-the-shell-s-own-stdout-stderr-to-children-a.patch
       - 0018-fix-windows-resolve-a-relative-program-path-against-.patch
       - 0019-fix-windows-spell-the-spawned-program-path-with-back.patch
       - 0020-fix-ignore-break-and-continue-outside-a-loop-as-bash.patch
@@ -43,12 +41,12 @@ source:
       - 0032-feat-windows-rm-and-cat-builtins.patch
       - 0033-fix-windows-reserve-an-8-MiB-main-thread-stack.patch
       - 0034-feat-source-BASH_ENV-in-non-interactive-shells.patch
-  - url: https://github.com/reubeno/brush/releases/download/brush-shell-v0.4.0/brush-docs.tar.gz
-    sha256: 1070fa3a9470927c0c3d9c5417151f1b8f72317b42bed21f33e5fd4f3dad3332
+  - url: https://github.com/reubeno/brush/releases/download/brush-shell-v${{ version }}/brush-docs.tar.gz
+    sha256: 4ee772d5842be84c99f2a2ca5aac905bc2d6a7b7229955371129f4f7e19eb677
     target_directory: docs
 
 build:
-  number: 13
+  number: 0
   script:
     interpreter: brush
     file: build.sh

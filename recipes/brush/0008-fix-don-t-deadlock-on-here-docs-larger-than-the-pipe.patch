@@ -1,8 +1,7 @@
-From fb385321fa134e652299d97e5d275177e8b4ee20 Mon Sep 17 00:00:00 2001
+From 3a82e4ce9c79c933dbcae002fa7227736532e621 Mon Sep 17 00:00:00 2001
 From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
-Date: Thu, 1 Oct 2026 17:00:53 +0200
-Subject: [PATCH 08/21] fix: don't deadlock on here-docs larger than the pipe
- buffer
+Date: Thu, 26 Nov 2026 14:35:09 +0100
+Subject: [PATCH] fix: don't deadlock on here-docs larger than the pipe buffer
 
 A here-doc is written into a pipe before the command that reads it
 starts. Linux grows the pipe to fit; elsewhere a here-doc larger than
@@ -13,16 +12,19 @@ Write the contents from a separate thread on those platforms; wasm has
 no threads and keeps the synchronous write.
 
 Assisted-by: Claude Code:claude-opus-5-5
+
+Rebased for brush 0.5.0.
+Assisted-by: Codex:GPT-6
 ---
  brush-core/src/interp.rs                 | 18 ++++++++++++++++--
  brush-shell/tests/cases/compat/here.yaml | 12 ++++++++++++
  2 files changed, 28 insertions(+), 2 deletions(-)
 
 diff --git a/brush-core/src/interp.rs b/brush-core/src/interp.rs
-index f991e45d..6875a0ad 100644
+index 58e63975..9a8c58ac 100644
 --- a/brush-core/src/interp.rs
 +++ b/brush-core/src/interp.rs
-@@ -2039,8 +2039,22 @@ fn setup_open_file_with_contents(contents: &str) -> Result<OpenFile, error::Erro
+@@ -2101,8 +2101,22 @@ fn setup_open_file_with_contents(contents: &str) -> Result<OpenFile, error::Erro
          nix::fcntl::fcntl(reader.as_fd(), nix::fcntl::FcntlArg::F_SETPIPE_SZ(len))?;
      }
  
@@ -48,13 +50,13 @@ index f991e45d..6875a0ad 100644
      Ok(reader.into())
  }
 diff --git a/brush-shell/tests/cases/compat/here.yaml b/brush-shell/tests/cases/compat/here.yaml
-index 627211bc..3f663231 100644
+index 6a830a56..3e440c8c 100644
 --- a/brush-shell/tests/cases/compat/here.yaml
 +++ b/brush-shell/tests/cases/compat/here.yaml
-@@ -654,3 +654,15 @@ cases:
-       body
-       EOF)
-       echo "[$x]"
+@@ -932,3 +932,15 @@ cases:
+       cat <<EOF
+       [$*] [${u:-$*}]
+       EOF
 +
 +  # The body is written into a pipe before its reader starts; it must not block
 +  # once it exceeds the pipe buffer.

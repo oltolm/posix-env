@@ -1,6 +1,6 @@
-From d487b892bf94842bbd310e1cdcf7dbed75991dea Mon Sep 17 00:00:00 2001
+From f701fb1fc1ae972b54ef5fcc3049a0d51842c087 Mon Sep 17 00:00:00 2001
 From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
-Date: Sun, 4 Oct 2026 14:45:07 +0200
+Date: Thu, 26 Nov 2026 14:35:10 +0100
 Subject: [PATCH] fix: keep command substitution output that is not UTF-8
 
 The output was read with read_to_string, so a single byte that is not
@@ -14,6 +14,9 @@ Read the bytes and convert them lossily, as the shell's other expansions
 already do.  Bash keeps the bytes themselves; a String cannot.
 
 Assisted-by: Claude Code:claude-opus-5-5
+
+Rebased for brush 0.5.0.
+Assisted-by: Codex:GPT-6
 ---
  brush-core/src/sys/stubs/async_pipe.rs        | 10 +++++---
  brush-core/src/sys/unix/async_pipe.rs         | 10 +++++---

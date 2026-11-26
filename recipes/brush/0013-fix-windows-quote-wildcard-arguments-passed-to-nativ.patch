@@ -1,7 +1,7 @@
-From f12031f5971bd578f6c868c8adc5f15d3743c3fa Mon Sep 17 00:00:00 2001
+From 93861fec45232e83e06e9ada2b8152f3e0dc2857 Mon Sep 17 00:00:00 2001
 From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
-Date: Fri, 2 Oct 2026 00:04:35 +0200
-Subject: [PATCH 13/21] fix(windows): quote wildcard arguments passed to native
+Date: Thu, 26 Nov 2026 14:35:09 +0100
+Subject: [PATCH] fix(windows): quote wildcard arguments passed to native
  programs
 
 Native programs often expand wildcards in their own command line: Rust
@@ -16,30 +16,34 @@ with whitespace or quotes.  Quote arguments containing `*`, `?` or `[`
 ourselves and pass them with `raw_arg`.
 
 Assisted-by: Claude Code:claude-opus-5-5
----
- brush-core/src/commands.rs | 71 ++++++++++++++++++++++++++++++++++++++
- 1 file changed, 71 insertions(+)
 
-diff --git a/brush-core/src/commands.rs b/brush-core/src/commands.rs
-index 6533d2b7..6eb12984 100644
---- a/brush-core/src/commands.rs
-+++ b/brush-core/src/commands.rs
-@@ -204,6 +204,11 @@ pub fn compose_std_command<S: AsRef<OsStr>, SE: extensions::ShellExtensions>(
-     cmd.arg0(argv0);
- 
-     // Pass through args.
+Rebased for brush 0.5.0.
+Assisted-by: Codex:GPT-6
+---
+ brush-core/src/sys/tokio_process.rs | 74 +++++++++++++++++++++++++++++
+ 1 file changed, 74 insertions(+)
+
+diff --git a/brush-core/src/sys/tokio_process.rs b/brush-core/src/sys/tokio_process.rs
+index 14730d6a..01489a33 100644
+--- a/brush-core/src/sys/tokio_process.rs
++++ b/brush-core/src/sys/tokio_process.rs
+@@ -65,6 +65,11 @@ fn compose_std_command(command: LaunchRequest) -> std::io::Result<std::process::
+     // Override argv[0].
+     // NOTE: Not supported on all platforms.
+     cmd.arg0(command.argv0);
 +    #[cfg(windows)]
-+    for arg in args {
-+        push_windows_arg(&mut cmd, arg.as_ref());
++    for arg in &command.args {
++        push_windows_arg(&mut cmd, std::ffi::OsStr::new(arg));
 +    }
 +    #[cfg(not(windows))]
-     cmd.args(args);
- 
-     // Use the shell's current working dir.
-@@ -905,10 +910,76 @@ fn crlf_to_lf(output: String) -> String {
+     cmd.args(command.args);
+     cmd.current_dir(command.working_dir);
+     cmd.env_clear();
+@@ -107,3 +112,72 @@ fn take_stdio(open_files: &mut OpenFiles, fd: ShellFd) -> std::io::Result<Stdio>
+         None => Ok(Stdio::null()),
      }
  }
- 
++
 +/// Adds `arg` to the command line, double-quoted if it contains a wildcard.
 +///
 +/// The shell has already expanded patterns, but many native programs expand
@@ -47,7 +51,7 @@ index 6533d2b7..6eb12984 100644
 +/// using the `wild` crate, such as uutils.  Both leave quoted arguments alone,
 +/// while `std` quotes only arguments containing whitespace or quotes.
 +#[cfg(windows)]
-+fn push_windows_arg(cmd: &mut std::process::Command, arg: &OsStr) {
++fn push_windows_arg(cmd: &mut std::process::Command, arg: &std::ffi::OsStr) {
 +    use std::os::windows::process::CommandExt;
 +
 +    match arg.to_str() {
@@ -91,12 +95,9 @@ index 6533d2b7..6eb12984 100644
 +    quoted
 +}
 +
- #[cfg(test)]
- #[cfg(windows)]
- mod tests {
-     use super::crlf_to_lf;
++#[cfg(all(test, windows))]
++mod quoting_tests {
 +    use super::quote_windows_arg;
-+
 +    #[test]
 +    fn wildcard_arg_is_quoted() {
 +        assert_eq!(quote_windows_arg(".*[^-+._a-z]"), "\".*[^-+._a-z]\"");
@@ -110,6 +111,4 @@ index 6533d2b7..6eb12984 100644
 +        assert_eq!(quote_windows_arg(r#"a"*"#), r#""a\"*""#);
 +        assert_eq!(quote_windows_arg(r#"a\"*"#), r#""a\\\"*""#);
 +    }
- 
-     #[test]
-     fn command_substitution_drops_cr_before_lf() {
++}

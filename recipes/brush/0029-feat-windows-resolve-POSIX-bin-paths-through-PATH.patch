@@ -1,4 +1,6 @@
+From 1091c71e2a65fe1bc2be209d98e6b879361d1e8c Mon Sep 17 00:00:00 2001
 From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Thu, 26 Nov 2026 14:35:11 +0100
 Subject: [PATCH] feat(windows): resolve POSIX bin paths through PATH
 
 Native Windows has no /bin or /usr/bin, but POSIX build scripts commonly
@@ -9,43 +11,61 @@ the same rule when executing a command directly.
 Only direct children of /bin and /usr/bin are mapped, so other absolute and
 nested paths retain their normal meaning.  Keep the original command name
 for argv[0] and diagnostics while using the mapped name only for PATH lookup.
+
+Rebased for brush 0.5.0.
+Assisted-by: Codex:GPT-6
 ---
- brush-core/src/commands.rs                      | 13 +++++++++----
- brush-core/src/sys/windows/fs.rs                | 25 +++++++++++++++++++++++++
- brush-shell/tests/cases/brush/command_path.yaml |  9 +++++++++
- 3 files changed, 43 insertions(+), 4 deletions(-)
+ brush-core/src/commands.rs                    | 12 ++++++---
+ brush-core/src/shell/fs.rs                    |  2 ++
+ brush-core/src/sys/windows/fs.rs              | 25 +++++++++++++++++++
+ .../tests/cases/brush/command_path.yaml       |  9 +++++++
+ 4 files changed, 45 insertions(+), 3 deletions(-)
 
 diff --git a/brush-core/src/commands.rs b/brush-core/src/commands.rs
+index f190de28..0cb97dc4 100644
 --- a/brush-core/src/commands.rs
 +++ b/brush-core/src/commands.rs
-@@ -455,14 +455,19 @@ impl<'a, SE: extensions::ShellExtensions> SimpleCommand<'a, SE> {
+@@ -484,13 +484,19 @@ impl<'a, SE: extensions::ShellExtensions> SimpleCommand<'a, SE> {
          }
  
          // We still haven't found a command to invoke. We'll need to look for an external command.
--        if !sys::fs::contains_path_separator(&self.command_name) {
 +        #[cfg(windows)]
-+        let path_search_name = sys::fs::virtual_posix_bin_command_name(&self.command_name);
++        let command_name = sys::fs::virtual_posix_bin_command_name(&self.command_name)
++            .unwrap_or(&self.command_name);
 +        #[cfg(not(windows))]
-+        let path_search_name: Option<&str> = None;
++        let command_name = self.command_name.as_str();
 +
-+        if !sys::fs::contains_path_separator(&self.command_name) || path_search_name.is_some() {
-+            let command_name = path_search_name.unwrap_or(&self.command_name);
-             // All else failed; if we were given path directories to search, look through them
-             // for a match. Otherwise, use our default search logic.
-             let path = if let Some(path_dirs) = &self.path_dirs {
+         // If we were given path directories to search, look through them for a match.
+         // Otherwise, use our default search logic.
+         let path = match &self.path_dirs {
+-            Some(path_dirs) if !sys::fs::contains_path_separator(&self.command_name) => {
 -                pathsearch::resolve_command(path_dirs, self.command_name.as_str())
++            Some(path_dirs) if !sys::fs::contains_path_separator(command_name) => {
 +                pathsearch::resolve_command(path_dirs, command_name)
-             } else {
--                self.shell
--                    .resolve_command_in_path_using_cache(&self.command_name)
-+                self.shell.resolve_command_in_path_using_cache(command_name)
-             };
+             }
+-            _ => self.shell.resolve_external_command(&self.command_name),
++            _ => self.shell.resolve_external_command(command_name),
+         };
  
-             if let Some(path) = path {
+         if let Some(path) = path {
+diff --git a/brush-core/src/shell/fs.rs b/brush-core/src/shell/fs.rs
+index e493c75e..0761860d 100644
+--- a/brush-core/src/shell/fs.rs
++++ b/brush-core/src/shell/fs.rs
+@@ -203,6 +203,8 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
+     ///
+     /// * `name` - The name of the command.
+     pub fn resolve_external_command(&mut self, name: &str) -> Option<PathBuf> {
++        #[cfg(windows)]
++        let name = crate::sys::fs::virtual_posix_bin_command_name(name).unwrap_or(name);
+         if crate::sys::fs::contains_path_separator(name) {
+             Some(crate::sys::fs::resolve_executable_path(
+                 PathBuf::from(name),
 diff --git a/brush-core/src/sys/windows/fs.rs b/brush-core/src/sys/windows/fs.rs
+index 8d39d4bc..5c338e8d 100644
 --- a/brush-core/src/sys/windows/fs.rs
 +++ b/brush-core/src/sys/windows/fs.rs
-@@ -278,6 +278,18 @@ pub fn contains_path_separator(s: &str) -> bool {
+@@ -287,6 +287,18 @@ pub fn contains_path_separator(s: &str) -> bool {
      s.contains(PATH_SEPARATORS)
  }
  
@@ -64,7 +84,7 @@ diff --git a/brush-core/src/sys/windows/fs.rs b/brush-core/src/sys/windows/fs.rs
  /// Returns true if the string ends with a path separator character.
  ///
  /// On Windows, both `/` and `\` are considered path separators.
-@@ -400,6 +412,19 @@ mod tests {
+@@ -409,6 +421,19 @@ mod tests {
          assert_eq!(rfind_path_separator("abc"), None);
      }
  
@@ -85,6 +105,7 @@ diff --git a/brush-core/src/sys/windows/fs.rs b/brush-core/src/sys/windows/fs.rs
      fn split_path_for_pattern_both_slashes() {
          let parts: Vec<_> = split_path_for_pattern("a/b/c").collect();
 diff --git a/brush-shell/tests/cases/brush/command_path.yaml b/brush-shell/tests/cases/brush/command_path.yaml
+index a0f93b78..6da486e8 100644
 --- a/brush-shell/tests/cases/brush/command_path.yaml
 +++ b/brush-shell/tests/cases/brush/command_path.yaml
 @@ -38,3 +38,12 @@ cases:

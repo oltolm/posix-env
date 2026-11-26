@@ -29,13 +29,13 @@ in a local channel only; no package from any conda channel. The toolchain
 - [x] rattler-build runs `build.sh` with `interpreter: brush` from the build env.
 - [x] Bootstrap package `posix-env 0.0.0 bootstrap`, seeded from the MSYS2-installed tools.
 - [x] Activation script: forward-slash paths, `CONFIG_SHELL`, `CONFIG_SITE`, `PATH_SEPARATOR`, `PERL5SHELL`.
-- [x] Release sources only, no git snapshots (brush excepted until a newer release; see below).
+- [x] Release sources only, no git snapshots (brush updated to 0.5.0).
 - [x] uutils-coreutils 0.12.0: one `coreutils.exe` plus `share\uutils-coreutils\utilities.txt`; post-link `.bat` hard-links each name, pre-unlink `.bat` deletes them. Add `--features openssl` once openssl is packaged (it only speeds up md5/sha digests).
 - [x] scriptexe 0.1.0 (`libexec\posix-env\scriptexe.exe`).
 - [x] winflexbison 2.5.25 release plus a backport of upstream a243a1c (CMake without MSVC); `yacc` needs `sh` at run time.
 - [x] gmp 6.3.0 (shared only; `CC="gcc -std=gnu17"`, GCC 16's C23 default breaks its configure probes) and mpfr 4.2.2.
 - [x] gawk 5.4.1 with the pc/ port and MPFR. The pc/ Makefile also has readline targets: add readline once it is packaged.
-- [x] brush snapshot with patches 0001-0021 from `C:\src\brush` `windows-native` (0021: libtool's `cmd //c` path conversion); `sh`/`bash` hard links via link scripts.
+- [x] brush 0.5.0: recipe and `C:\src\brush` `windows-native` synchronized with 27 patches; 0007, 0014, and 0017 are covered upstream, and 0025 retains only its regression test. Libtool/gettext substitutions live in posix-env-prepare. `sh`/`bash` hard links via link scripts.
 - [x] uutils-sed 0.2.0 (5 patches), uutils-grep 0.2.0, uutils-findutils 0.10.0 (find, xargs); grep and findutils link the packaged oniguruma through pkg-config.
 - [x] pkgconf 3.0.7 (release tarball's configure, no meson), oniguruma 6.9.10, gperf 3.3.
 - [x] libiconv 1.19 with the CP65001 alias (tables regenerated with gperf); no NLS, since gettext-runtime needs libiconv in `host:`.

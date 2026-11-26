@@ -1,7 +1,7 @@
-From 903691846be7fe6d3ab3c147d309b24bee11ecac Mon Sep 17 00:00:00 2001
+From ac4aa3a259701ce3f7625c28d2c0bb2f091c53c8 Mon Sep 17 00:00:00 2001
 From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
-Date: Fri, 2 Oct 2026 19:17:48 +0200
-Subject: [PATCH 16/21] feat(windows): implement `test -ef`
+Date: Thu, 26 Nov 2026 14:35:09 +0100
+Subject: [PATCH] feat(windows): implement `test -ef`
 
 `test FILE1 -ef FILE2` failed on Windows with "operation not supported
 on this platform: get_device_and_inode".  QEMU's configure uses it to
@@ -13,6 +13,9 @@ what st_dev and st_ino hold on Unix.  winapi-util opens the path with
 backup semantics, so directories work too.
 
 Assisted-by: Claude Code:claude-opus-5-5
+
+Rebased for brush 0.5.0.
+Assisted-by: Codex:GPT-6
 ---
  Cargo.lock                       |  1 +
  brush-core/Cargo.toml            |  1 +
@@ -21,10 +24,10 @@ Assisted-by: Claude Code:claude-opus-5-5
  4 files changed, 28 insertions(+), 2 deletions(-)
 
 diff --git a/Cargo.lock b/Cargo.lock
-index 8629a21a..f70ffb84 100644
+index 4e36d97a..de960d4f 100644
 --- a/Cargo.lock
 +++ b/Cargo.lock
-@@ -437,6 +437,7 @@ dependencies = [
+@@ -467,6 +467,7 @@ dependencies = [
   "uuid",
   "uzers",
   "whoami",
@@ -33,12 +36,12 @@ index 8629a21a..f70ffb84 100644
  
  [[package]]
 diff --git a/brush-core/Cargo.toml b/brush-core/Cargo.toml
-index 394b5759..59dc2ecd 100644
+index 436db4fc..8912c520 100644
 --- a/brush-core/Cargo.toml
 +++ b/brush-core/Cargo.toml
-@@ -63,6 +63,7 @@ tokio = { version = "1.52.3", features = [
+@@ -62,6 +62,7 @@ tokio = { version = "1.52.3", features = [
  [target.'cfg(windows)'.dependencies]
- check_elevation = "0.2.7"
+ check_elevation = "0.3.0"
  whoami = "2.1.1"
 +winapi-util = "0.1.11"
  
@@ -75,10 +78,10 @@ index ded10b07..946b95ad 100644
 +    }
  }
 diff --git a/brush-core/src/sys/windows/fs.rs b/brush-core/src/sys/windows/fs.rs
-index b336a699..bcbf4610 100644
+index f2afee91..8d39d4bc 100644
 --- a/brush-core/src/sys/windows/fs.rs
 +++ b/brush-core/src/sys/windows/fs.rs
-@@ -179,8 +179,11 @@ impl crate::sys::fs::PathExt for Path {
+@@ -188,8 +188,11 @@ impl crate::sys::fs::PathExt for Path {
      }
  
      fn get_device_and_inode(&self) -> Result<(u64, u64), crate::error::Error> {

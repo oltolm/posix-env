@@ -1,8 +1,7 @@
-From 773db766bbd2cb24db296e06b475379b64c15cfb Mon Sep 17 00:00:00 2001
+From ea829fac796d85a7e3489a6058f368add74eb152 Mon Sep 17 00:00:00 2001
 From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
-Date: Sat, 3 Oct 2026 17:54:20 +0200
-Subject: [PATCH 19/21] fix(windows): spell the spawned program path with
- backslashes
+Date: Thu, 26 Nov 2026 14:35:10 +0100
+Subject: [PATCH] fix(windows): spell the spawned program path with backslashes
 
 PATH entries are joined with `/`, so `cmd` resolves to
 `C:\WINDOWS\System32/cmd.exe`.  That path starts the child's command
@@ -16,18 +15,35 @@ Convert `/` to `\` in the program path handed to CreateProcess.  The
 path the shell reports (`command -v`, `$_`) keeps its `/`.
 
 Assisted-by: Claude Code:claude-opus-5-5
+
+Rebased for brush 0.5.0.
+Assisted-by: Codex:GPT-6
 ---
- brush-core/src/commands.rs | 28 +++++++++++++++++++++++++++-
+ brush-core/src/sys/tokio_process.rs | 28 +++++++++++++++++++++++++++-
  1 file changed, 27 insertions(+), 1 deletion(-)
 
-diff --git a/brush-core/src/commands.rs b/brush-core/src/commands.rs
-index 7a1f81e7..359f1a05 100644
---- a/brush-core/src/commands.rs
-+++ b/brush-core/src/commands.rs
-@@ -157,6 +157,28 @@ impl<SE: extensions::ShellExtensions> std::ops::DerefMut for ShellForCommand<'_,
+diff --git a/brush-core/src/sys/tokio_process.rs b/brush-core/src/sys/tokio_process.rs
+index 01489a33..64da85e7 100644
+--- a/brush-core/src/sys/tokio_process.rs
++++ b/brush-core/src/sys/tokio_process.rs
+@@ -60,7 +60,11 @@ pub(crate) fn exec(command: LaunchRequest) -> std::io::Error {
+ 
+ /// Composes the `std::process::Command` that starts a process.
+ fn compose_std_command(command: LaunchRequest) -> std::io::Result<std::process::Command> {
+-    let mut cmd = std::process::Command::new(command.program);
++    #[cfg(windows)]
++    let program = windows_program_path(&command.program);
++    #[cfg(not(windows))]
++    let program = command.program;
++    let mut cmd = std::process::Command::new(program);
+ 
+     // Override argv[0].
+     // NOTE: Not supported on all platforms.
+@@ -181,3 +185,25 @@ mod quoting_tests {
+         assert_eq!(quote_windows_arg(r#"a\"*"#), r#""a\\\"*""#);
      }
  }
- 
++
 +/// Spells a program path with `\` separators for `CreateProcess`.
 +///
 +/// The shell joins PATH entries with `/` (see `join_command_path`), but the program
@@ -49,27 +65,3 @@ index 7a1f81e7..359f1a05 100644
 +        .collect();
 +    std::ffi::OsString::from_wide(&wide)
 +}
-+
- /// Composes a `std::process::Command` to execute the given command. Appropriately
- /// configures the command name and arguments, redirections, injected file
- /// descriptors, environment variables, etc.
-@@ -192,6 +214,8 @@ pub fn compose_std_command<S: AsRef<OsStr>, SE: extensions::ShellExtensions>(
- 
-     let mut cmd;
-     if let Some((interp_path, interp_arg)) = interpreter {
-+        #[cfg(windows)]
-+        let interp_path = windows_program_path(&interp_path);
-         cmd = std::process::Command::new(interp_path);
-         cmd.args(interp_arg);
-         cmd.arg(command_name);
-@@ -200,7 +224,9 @@ pub fn compose_std_command<S: AsRef<OsStr>, SE: extensions::ShellExtensions>(
-         // not the child's; `cd` changes only the shell's.
-         #[cfg(windows)]
-         if crate::sys::fs::contains_path_separator(command_name) {
--            cmd = std::process::Command::new(context.shell.absolute_path(command_name));
-+            cmd = std::process::Command::new(windows_program_path(
-+                &context.shell.absolute_path(command_name),
-+            ));
-         } else {
-             cmd = std::process::Command::new(command_name);
-         }

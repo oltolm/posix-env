@@ -1,7 +1,7 @@
-From e109a87ebc2fed894d892717ffa771b1f476a761 Mon Sep 17 00:00:00 2001
+From 3b4289b930291ee4c38e2ebdf11a6353b6f95b3e Mon Sep 17 00:00:00 2001
 From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
-Date: Thu, 1 Oct 2026 17:00:53 +0200
-Subject: [PATCH 04/21] feat(windows): run #! scripts through their interpreter
+Date: Thu, 26 Nov 2026 14:35:08 +0100
+Subject: [PATCH] feat(windows): run #! scripts through their interpreter
 
 Windows cannot execute scripts itself, so running `./config.status`,
 `./libtool` or any other `#!` script failed with os error 193.
@@ -14,46 +14,63 @@ its argument. Such scripts also count as executable for `test -x` and
 PATH lookup.
 
 Assisted-by: Claude Code:claude-opus-5-5
+
+Rebased for brush 0.5.0.
+Assisted-by: Codex:GPT-6
 ---
- brush-core/src/commands.rs       |  22 ++++++-
+ brush-core/src/commands.rs       |  28 +++++++-
  brush-core/src/sys/windows/fs.rs | 106 ++++++++++++++++++++++++++++++-
- 2 files changed, 126 insertions(+), 2 deletions(-)
+ 2 files changed, 132 insertions(+), 2 deletions(-)
 
 diff --git a/brush-core/src/commands.rs b/brush-core/src/commands.rs
-index 6fc537e9..c69caa15 100644
+index d419cbd9..962e9b1a 100644
 --- a/brush-core/src/commands.rs
 +++ b/brush-core/src/commands.rs
-@@ -177,7 +177,27 @@ pub fn compose_std_command<S: AsRef<OsStr>, SE: extensions::ShellExtensions>(
+@@ -246,7 +246,8 @@ pub fn compose_launch_request<S: AsRef<str>, SE: extensions::ShellExtensions>(
      args: &[S],
-     empty_env: bool,
- ) -> Result<std::process::Command, error::Error> {
--    let mut cmd = std::process::Command::new(command_name);
+     env: ProgramEnvironment,
+ ) -> processes::LaunchRequest {
+-    processes::LaunchRequest {
++    #[allow(unused_mut)]
++    let mut request = processes::LaunchRequest {
+         program: program.to_owned(),
+         argv0: argv0.to_owned(),
+         args: args.iter().map(|arg| arg.as_ref().to_owned()).collect(),
+@@ -261,7 +262,32 @@ pub fn compose_launch_request<S: AsRef<str>, SE: extensions::ShellExtensions>(
+         open_files: context.iter_fds().into(),
+         process_group: processes::ProcessGroup::Inherit,
+         kill_on_drop: context.shell.options().kill_external_commands_on_drop,
++    };
 +    #[cfg(windows)]
-+    let interpreter = crate::sys::fs::script_interpreter(
-+        &context.shell.absolute_path(command_name),
++    if let Some((interpreter, arg)) = sys::fs::script_interpreter(
++        &context.shell.absolute_path(program),
 +    )
 +    .and_then(|(name, arg)| {
 +        context
 +            .shell
 +            .find_first_executable_in_path(&name)
 +            .map(|path| (path, arg))
-+    });
-+    #[cfg(not(windows))]
-+    let interpreter: Option<(std::path::PathBuf, Option<String>)> = None;
-+
-+    let mut cmd;
-+    if let Some((interp_path, interp_arg)) = interpreter {
-+        cmd = std::process::Command::new(interp_path);
-+        cmd.args(interp_arg);
-+        cmd.arg(command_name);
-+    } else {
-+        cmd = std::process::Command::new(command_name);
-+    }
++    }) {
++        let mut args: Vec<String> = arg.into_iter().collect();
++        args.push(
++            if sys::fs::contains_path_separator(&context.command_name)
++                && Path::new(&context.command_name).is_relative()
++            {
++                context.command_name.clone()
++            } else {
++                program.to_string_lossy().into_owned()
++            },
++        );
++        args.append(&mut request.args);
++        request.program = interpreter;
++        request.args = args;
+     }
++    request
+ }
  
-     // Override argv[0].
-     // NOTE: Not supported on all platforms.
+ /// Composes the environment for an external command: the shell's exported
 diff --git a/brush-core/src/sys/windows/fs.rs b/brush-core/src/sys/windows/fs.rs
-index 78650089..5000c069 100644
+index 88e0be5d..1f92ee55 100644
 --- a/brush-core/src/sys/windows/fs.rs
 +++ b/brush-core/src/sys/windows/fs.rs
 @@ -50,7 +50,60 @@ fn has_executable_extension(path: &Path) -> bool {
@@ -118,7 +135,7 @@ index 78650089..5000c069 100644
  }
  
  /// Resolves an owned path to the actual on-disk executable file, if any.
-@@ -452,4 +505,55 @@ mod tests {
+@@ -461,4 +514,55 @@ mod tests {
          let path = PathBuf::from(r"C:\__brush_test_definitely_missing__");
          assert!(resolve_executable(path).is_none());
      }

@@ -1,4 +1,6 @@
+From a88fe246e12e0cb789c521ce67737b5140d0147e Mon Sep 17 00:00:00 2001
 From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Thu, 26 Nov 2026 14:35:11 +0100
 Subject: [PATCH] feat(windows): rm and cat builtins
 
 Configure scripts run rm -f and cat over a thousand times; on Windows
@@ -11,33 +13,38 @@ exit status apply.  The builtins exist on Windows only; enable -n
 turns them off.
 
 Assisted-by: Claude Code:claude-opus-5-5
+
+Rebased for brush 0.5.0.
+Assisted-by: Codex:GPT-6
 ---
  Cargo.lock                                    |   1 +
  brush-builtins/Cargo.toml                     |   5 +
- brush-builtins/src/cat.rs                     |  80 +++++++++++
+ brush-builtins/src/cat.rs                     | 100 +++++++++++++
  brush-builtins/src/external.rs                |  33 +++++
- brush-builtins/src/factory.rs                 |   8 ++
+ brush-builtins/src/factory.rs                 |  11 ++
  brush-builtins/src/lib.rs                     |   6 +
- brush-builtins/src/rm.rs                      | 116 +++++++++++++++
- brush-builtins/tests/windows_file_builtins.rs | 133 ++++++++++++++++++
- 8 files changed, 382 insertions(+)
+ brush-builtins/src/rm.rs                      | 134 ++++++++++++++++++
+ brush-builtins/tests/windows_file_builtins.rs | 133 +++++++++++++++++
+ 8 files changed, 423 insertions(+)
  create mode 100644 brush-builtins/src/cat.rs
  create mode 100644 brush-builtins/src/external.rs
  create mode 100644 brush-builtins/src/rm.rs
  create mode 100644 brush-builtins/tests/windows_file_builtins.rs
 
 diff --git a/Cargo.lock b/Cargo.lock
+index 17f90603..e909e0c0 100644
 --- a/Cargo.lock
 +++ b/Cargo.lock
-@@ -391,6 +391,7 @@ dependencies = [
+@@ -400,6 +400,7 @@ dependencies = [
   "procfs",
   "rlimit",
   "strum",
 + "tempfile",
-  "thiserror 2.0.20",
+  "thiserror 2.0.21",
   "tokio",
   "tracing",
 diff --git a/brush-builtins/Cargo.toml b/brush-builtins/Cargo.toml
+index 8a415f38..155f1a6b 100644
 --- a/brush-builtins/Cargo.toml
 +++ b/brush-builtins/Cargo.toml
 @@ -21,6 +21,7 @@ default = [
@@ -72,17 +79,17 @@ diff --git a/brush-builtins/Cargo.toml b/brush-builtins/Cargo.toml
  'builtin.set' = []
  'builtin.shift' = []
  'builtin.shopt' = []
-@@ -175,3 +179,4 @@ procfs = "0.18.0"
+@@ -178,3 +182,4 @@ procfs = { version = "0.18.0", default-features = false }
  [dev-dependencies]
  anyhow = "1.0.102"
  pretty_assertions = { version = "1.4.1", features = ["unstable"] }
 +tempfile = "3.27.0"
 diff --git a/brush-builtins/src/cat.rs b/brush-builtins/src/cat.rs
 new file mode 100644
+index 00000000..affa2d5e
 --- /dev/null
 +++ b/brush-builtins/src/cat.rs
-@@ -0,0 +1,80 @@
-+use clap::Parser;
+@@ -0,0 +1,100 @@
 +use std::io::Write;
 +
 +use brush_core::{ExecutionResult, builtins};
@@ -91,28 +98,49 @@ new file mode 100644
 +///
 +/// Copies the operands itself when no options are given; with options, and
 +/// for each operand that cannot be opened, the external cat runs instead.
-+#[derive(Parser)]
-+#[clap(disable_help_flag = true, disable_version_flag = true)]
 +pub(crate) struct CatCommand {
 +    /// Operands, as given.
-+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
 +    args: Vec<String>,
 +}
 +
-+impl builtins::Command for CatCommand {
-+    type Error = brush_core::Error;
-+
-+    fn new<I>(args: I) -> Result<Self, clap::Error>
-+    where
-+        I: IntoIterator<Item = String>,
-+    {
-+        Ok(Self {
-+            args: args.into_iter().skip(1).collect(),
-+        })
++impl builtins::ParseArgs for CatCommand {
++    fn content(
++        name: &str,
++        content_type: builtins::ContentType,
++        _options: &builtins::ContentOptions,
++    ) -> Result<String, brush_core::Error> {
++        match content_type {
++            builtins::ContentType::DetailedHelp => {
++                Ok("Concatenate files to standard output.".into())
++            }
++            builtins::ContentType::ShortUsage => {
++                Ok(format!("{name}: {name} [OPTION]... [FILE]...\n"))
++            }
++            builtins::ContentType::ShortDescription => {
++                Ok(format!("{name} - Concatenate files to standard output.\n"))
++            }
++            builtins::ContentType::ManPage => {
++                brush_core::error::unimp("man page not yet implemented")
++            }
++        }
 +    }
 +
-+    async fn execute<SE: brush_core::ShellExtensions>(
-+        &self,
++    fn parse(invocation: builtins::Invocation<'_>) -> Result<Self, builtins::UsageError> {
++        Ok(Self {
++            args: invocation
++                .into_args()
++                .into_iter()
++                .map(String::from)
++                .collect(),
++        })
++    }
++}
++
++impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for CatCommand {
++    type Error = brush_core::Error;
++
++    async fn execute(
++        self,
 +        mut context: brush_core::ExecutionContext<'_, SE>,
 +    ) -> Result<ExecutionResult, Self::Error> {
 +        let operands = match self.args.iter().position(|a| a == "--") {
@@ -164,6 +192,7 @@ new file mode 100644
 +}
 diff --git a/brush-builtins/src/external.rs b/brush-builtins/src/external.rs
 new file mode 100644
+index 00000000..6a2063d6
 --- /dev/null
 +++ b/brush-builtins/src/external.rs
 @@ -0,0 +1,33 @@
@@ -201,24 +230,29 @@ new file mode 100644
 +    Ok(cmd.execute().await?.wait().await?.into())
 +}
 diff --git a/brush-builtins/src/factory.rs b/brush-builtins/src/factory.rs
+index e68e5fa0..289e85a8 100644
 --- a/brush-builtins/src/factory.rs
 +++ b/brush-builtins/src/factory.rs
-@@ -140,6 +140,14 @@ pub fn default_builtins<SE: brush_core::ShellExtensions>(
-     #[cfg(feature = "builtin.wait")]
-     m.insert("wait".into(), builtin::<wait::WaitCommand, SE>());
+@@ -206,6 +206,17 @@ pub fn default_builtins<SE: brush_core::ShellExtensions>(
+         builtins::Registration::of::<wait::WaitCommand>(),
+     );
  
 +    // Utilities that configure scripts run over a thousand times; starting a
 +    // process takes milliseconds on Windows.  As with bash's loadable cat and
 +    // rm builtins, `enable -n` turns them off.
 +    #[cfg(all(feature = "builtin.cat", windows))]
-+    m.insert("cat".into(), builtin::<cat::CatCommand, SE>());
++    m.insert(
++        "cat".into(),
++        builtins::Registration::of::<cat::CatCommand>(),
++    );
 +    #[cfg(all(feature = "builtin.rm", windows))]
-+    m.insert("rm".into(), builtin::<rm::RmCommand, SE>());
++    m.insert("rm".into(), builtins::Registration::of::<rm::RmCommand>());
 +
      #[cfg(feature = "builtin.fc")]
-     m.insert("fc".into(), builtin::<fc::FcCommand, SE>());
+     m.insert("fc".into(), builtins::Registration::of::<fc::FcCommand>());
  
 diff --git a/brush-builtins/src/lib.rs b/brush-builtins/src/lib.rs
+index 7a9a1374..3d0fd421 100644
 --- a/brush-builtins/src/lib.rs
 +++ b/brush-builtins/src/lib.rs
 @@ -21,6 +21,8 @@ mod break_;
@@ -239,8 +273,8 @@ diff --git a/brush-builtins/src/lib.rs b/brush-builtins/src/lib.rs
  #[cfg(feature = "builtin.false")]
  mod false_;
  #[cfg(feature = "builtin.fc")]
-@@ -87,6 +91,8 @@ mod pwd;
- mod read;
+@@ -90,6 +94,8 @@ mod read;
+ mod not_ready;
  #[cfg(feature = "builtin.return")]
  mod return_;
 +#[cfg(all(feature = "builtin.rm", windows))]
@@ -250,10 +284,10 @@ diff --git a/brush-builtins/src/lib.rs b/brush-builtins/src/lib.rs
  #[cfg(feature = "builtin.shift")]
 diff --git a/brush-builtins/src/rm.rs b/brush-builtins/src/rm.rs
 new file mode 100644
+index 00000000..01f92f46
 --- /dev/null
 +++ b/brush-builtins/src/rm.rs
-@@ -0,0 +1,116 @@
-+use clap::Parser;
+@@ -0,0 +1,134 @@
 +use std::path::Path;
 +
 +use brush_core::{ExecutionResult, builtins};
@@ -263,28 +297,47 @@ new file mode 100644
 +/// Removes the operands itself when the options are only -f, -r or -R and
 +/// removal succeeds; anything else (other options, operands that cannot be
 +/// removed, error messages) is left to the external rm.
-+#[derive(Parser)]
-+#[clap(disable_help_flag = true, disable_version_flag = true)]
 +pub(crate) struct RmCommand {
 +    /// Options and operands, as given.
-+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
 +    args: Vec<String>,
 +}
 +
-+impl builtins::Command for RmCommand {
-+    type Error = brush_core::Error;
-+
-+    fn new<I>(args: I) -> Result<Self, clap::Error>
-+    where
-+        I: IntoIterator<Item = String>,
-+    {
-+        Ok(Self {
-+            args: args.into_iter().skip(1).collect(),
-+        })
++impl builtins::ParseArgs for RmCommand {
++    fn content(
++        name: &str,
++        content_type: builtins::ContentType,
++        _options: &builtins::ContentOptions,
++    ) -> Result<String, brush_core::Error> {
++        match content_type {
++            builtins::ContentType::DetailedHelp => Ok("Remove files or directories.".into()),
++            builtins::ContentType::ShortUsage => {
++                Ok(format!("{name}: {name} [OPTION]... [FILE]...\n"))
++            }
++            builtins::ContentType::ShortDescription => {
++                Ok(format!("{name} - Remove files or directories.\n"))
++            }
++            builtins::ContentType::ManPage => {
++                brush_core::error::unimp("man page not yet implemented")
++            }
++        }
 +    }
 +
-+    async fn execute<SE: brush_core::ShellExtensions>(
-+        &self,
++    fn parse(invocation: builtins::Invocation<'_>) -> Result<Self, builtins::UsageError> {
++        Ok(Self {
++            args: invocation
++                .into_args()
++                .into_iter()
++                .map(String::from)
++                .collect(),
++        })
++    }
++}
++
++impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for RmCommand {
++    type Error = brush_core::Error;
++
++    async fn execute(
++        self,
 +        mut context: brush_core::ExecutionContext<'_, SE>,
 +    ) -> Result<ExecutionResult, Self::Error> {
 +        let Some((options, operands)) = split_options(&self.args) else {
@@ -371,6 +424,7 @@ new file mode 100644
 +}
 diff --git a/brush-builtins/tests/windows_file_builtins.rs b/brush-builtins/tests/windows_file_builtins.rs
 new file mode 100644
+index 00000000..333f4110
 --- /dev/null
 +++ b/brush-builtins/tests/windows_file_builtins.rs
 @@ -0,0 +1,133 @@

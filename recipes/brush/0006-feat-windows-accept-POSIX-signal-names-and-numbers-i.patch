@@ -1,8 +1,7 @@
-From fcedbdca46377b1ca69e1d5d360164e3e795ee2f Mon Sep 17 00:00:00 2001
+From cd596b24a7384528914519ef594913045ef937af Mon Sep 17 00:00:00 2001
 From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
-Date: Thu, 1 Oct 2026 17:00:53 +0200
-Subject: [PATCH 06/21] feat(windows): accept POSIX signal names and numbers in
- trap
+Date: Thu, 26 Nov 2026 14:35:09 +0100
+Subject: [PATCH] feat(windows): accept POSIX signal names and numbers in trap
 
 The stub Signal type had no variants, so `trap ... 1 2 13 15`, as in
 every configure script, failed; trap is a special builtin, so the error
@@ -13,12 +12,15 @@ for signals the platform never delivers simply never run, as on
 Cygwin.
 
 Assisted-by: Claude Code:claude-opus-5-5
+
+Rebased for brush 0.5.0.
+Assisted-by: Codex:GPT-6
 ---
  brush-core/src/sys/stubs/signal.rs | 140 +++++++++++++++++++++++++++--
  1 file changed, 134 insertions(+), 6 deletions(-)
 
 diff --git a/brush-core/src/sys/stubs/signal.rs b/brush-core/src/sys/stubs/signal.rs
-index 772a15b4..b0df5f7a 100644
+index 5bca96ec..2a8caf23 100644
 --- a/brush-core/src/sys/stubs/signal.rs
 +++ b/brush-core/src/sys/stubs/signal.rs
 @@ -2,25 +2,128 @@
@@ -166,8 +168,8 @@ index 772a15b4..b0df5f7a 100644
      }
  }
  
-@@ -89,3 +194,26 @@ pub(crate) fn mask_sigttou() -> Result<(), error::Error> {
- pub(crate) fn poll_for_stopped_children() -> Result<bool, error::Error> {
+@@ -117,3 +222,26 @@ pub(crate) fn poll_for_stopped_children(
+ pub(crate) fn poll_for_stopped_child(_pid: sys::process::ProcessId) -> Result<bool, error::Error> {
      Ok(false)
  }
 +

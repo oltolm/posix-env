@@ -1,7 +1,7 @@
-From c9684f4b0487bd90307393af5340dc3bb640c75d Mon Sep 17 00:00:00 2001
+From 0f437fcb9f335387e6793b389ad9204bc4a5368f Mon Sep 17 00:00:00 2001
 From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
-Date: Thu, 1 Oct 2026 17:00:54 +0200
-Subject: [PATCH 09/21] feat(windows): add the umask builtin
+Date: Thu, 26 Nov 2026 14:35:09 +0100
+Subject: [PATCH] feat(windows): add the umask builtin
 
 config.status creates its temporary directory with
 `(umask 077 && mkdir "$tmp")`, which failed because umask was
@@ -11,30 +11,33 @@ Windows files have no POSIX mode bits for a umask to clear, so
 remember and report the value without applying it.
 
 Assisted-by: Claude Code:claude-opus-5-5
+
+Rebased for brush 0.5.0.
+Assisted-by: Codex:GPT-6
 ---
  brush-builtins/src/factory.rs |  2 +-
  brush-builtins/src/lib.rs     |  2 +-
- brush-builtins/src/umask.rs   | 39 +++++++++++++++++++++++++++++++++--
- 3 files changed, 39 insertions(+), 4 deletions(-)
+ brush-builtins/src/umask.rs   | 46 ++++++++++++++++++++++++++++++++---
+ 3 files changed, 45 insertions(+), 5 deletions(-)
 
 diff --git a/brush-builtins/src/factory.rs b/brush-builtins/src/factory.rs
-index e775b34d..f689b198 100644
+index c915db99..e68e5fa0 100644
 --- a/brush-builtins/src/factory.rs
 +++ b/brush-builtins/src/factory.rs
-@@ -133,7 +133,7 @@ pub fn default_builtins<SE: brush_core::ShellExtensions>(
-     m.insert("type".into(), builtin::<type_::TypeCommand, SE>());
-     #[cfg(all(feature = "builtin.ulimit", unix))]
-     m.insert("ulimit".into(), builtin::<ulimit::ULimitCommand, SE>());
+@@ -190,7 +190,7 @@ pub fn default_builtins<SE: brush_core::ShellExtensions>(
+         "ulimit".into(),
+         builtins::Registration::of::<ulimit::ULimitCommand>(),
+     );
 -    #[cfg(all(feature = "builtin.umask", unix))]
 +    #[cfg(all(feature = "builtin.umask", any(unix, windows)))]
-     m.insert("umask".into(), builtin::<umask::UmaskCommand, SE>());
-     #[cfg(feature = "builtin.unalias")]
-     m.insert("unalias".into(), builtin::<unalias::UnaliasCommand, SE>());
+     m.insert(
+         "umask".into(),
+         builtins::Registration::of::<umask::UmaskCommand>(),
 diff --git a/brush-builtins/src/lib.rs b/brush-builtins/src/lib.rs
-index c67620b3..8e2a81e2 100644
+index cad4bbc7..7a9a1374 100644
 --- a/brush-builtins/src/lib.rs
 +++ b/brush-builtins/src/lib.rs
-@@ -107,7 +107,7 @@ mod true_;
+@@ -110,7 +110,7 @@ mod true_;
  mod type_;
  #[cfg(all(feature = "builtin.ulimit", unix))]
  mod ulimit;
@@ -44,19 +47,35 @@ index c67620b3..8e2a81e2 100644
  #[cfg(feature = "builtin.unalias")]
  mod unalias;
 diff --git a/brush-builtins/src/umask.rs b/brush-builtins/src/umask.rs
-index 08a7c368..e7629cf8 100644
+index 6659b2d7..662f7b31 100644
 --- a/brush-builtins/src/umask.rs
 +++ b/brush-builtins/src/umask.rs
-@@ -1,7 +1,7 @@
+@@ -1,9 +1,14 @@
  use brush_core::{ErrorKind, ExecutionResult, builtins};
  use cfg_if::cfg_if;
- use clap::Parser;
 -#[cfg(not(any(target_os = "linux", target_os = "android")))]
 +#[cfg(all(unix, not(any(target_os = "linux", target_os = "android"))))]
  use nix::sys::stat::Mode;
  use std::io::Write;
  
-@@ -63,16 +63,27 @@ cfg_if! {
++#[cfg(unix)]
++type Mask = nix::sys::stat::mode_t;
++#[cfg(not(unix))]
++type Mask = u32;
++
+ /// Manage the process umask.
+ #[derive(winnow_args::Args)]
+ #[arg(disable_help_short, disable_version_flag, disable_help_subcommand)]
+@@ -34,7 +39,7 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for UmaskCommand {
+             if mode.starts_with(|c: char| c.is_ascii_digit()) {
+                 // Like bash, take any mode that starts with a digit as octal, and refuse
+                 // one with a digit that isn't octal or a value past 07777.
+-                let parsed = brush_core::int_utils::parse::<nix::sys::stat::mode_t>(mode, 8)
++                let parsed = brush_core::int_utils::parse::<Mask>(mode, 8)
+                     .ok()
+                     .filter(|value| *value <= 0o7777);
+ 
+@@ -92,16 +97,27 @@ cfg_if! {
              let umask = procfs::process::Process::myself().ok().and_then(|me| me.status().ok()).and_then(|status| status.umask);
              umask.ok_or_else(|| brush_core::ErrorKind::InvalidUmask.into())
          }
@@ -85,8 +104,8 @@ index 08a7c368..e7629cf8 100644
  fn set_umask(value: nix::sys::stat::mode_t) -> Result<(), brush_core::Error> {
      // value of mode_t can be platform dependent
      let mode = nix::sys::stat::Mode::from_bits(value).ok_or_else(|| ErrorKind::InvalidUmask)?;
-@@ -80,6 +91,15 @@ fn set_umask(value: nix::sys::stat::mode_t) -> Result<(), brush_core::Error> {
-     Ok(())
+@@ -181,6 +197,15 @@ fn apply_symbolic_mode(mode: &str, umask: u32) -> Result<u32, String> {
+     Ok(!perms & 0o777)
  }
  
 +#[cfg(not(unix))]
@@ -101,7 +120,7 @@ index 08a7c368..e7629cf8 100644
  fn symbolic_mask_from_bits(bits: u32) -> String {
      let mut result = String::new();
  
-@@ -95,3 +115,18 @@ fn symbolic_mask_from_bits(bits: u32) -> String {
+@@ -196,3 +221,18 @@ fn symbolic_mask_from_bits(bits: u32) -> String {
  
      result
  }

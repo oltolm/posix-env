@@ -131,8 +131,8 @@ build RECIPE [RECIPE...] [-- rattler-build options]
 
 Recipe conventions:
 
-- Release sources only, no git snapshots (brush is the exception until its
-  next release). GNU sources come from `https://ftpmirror.gnu.org/gnu/`.
+- Release sources only, no git snapshots. GNU sources come from
+  `https://ftpmirror.gnu.org/gnu/`.
 - `build.sh` runs with `interpreter: brush` from the build environment, which
   holds the posix-env packages themselves.
 - Builds use all cores: `make -j"$(nproc)"`.
@@ -341,7 +341,7 @@ Patches live next to each recipe (`recipes\NAME\*.patch`). The larger series:
 
 | Project | Changes |
 |---|---|
-| brush | Windows: `exec`, `/` in `PWD` and command paths, `#!` scripts, `test -x` on directories, `test -ef`, POSIX signal names in `trap`, `umask`, CRLF in command substitution; all platforms: deadlocks with large here-docs and concurrent pipeline stages, backquote and `case` parsing, non-UTF-8 command substitution output |
+| brush | Windows: `exec`, `/` in `PWD` and command paths, `#!` scripts, `test -x` on directories, `test -ef`, POSIX signal names in `trap`, `umask`, CRLF in command substitution; all platforms: deadlocks with large here-docs, backquote and `case` parsing, non-UTF-8 command substitution output |
 | uutils | coreutils: `ln` symlink targets, `dd conv=lcase/ucase`, `env` runs `#!` scripts; sed: `&` as delimiter, unknown escapes, bracket expressions, escaped anchors, `n`, the `-i` suffix |
 | perl | MSYS2's patches; binary PerlIO by default, POSIX `setlocale`, UTF-8 manifests |
 | autoconf, automake | closing files before Win32 replaces them, exit statuses without `POSIX::WIFEXITED`, `/` in generated paths |

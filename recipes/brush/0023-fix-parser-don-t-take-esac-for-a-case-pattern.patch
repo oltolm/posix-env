@@ -1,6 +1,6 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From 359488ca73c56d96a48ef90da8867601749917d7 Mon Sep 17 00:00:00 2001
 From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
-Date: Sun, 4 Oct 2026 23:59:05 +0200
+Date: Thu, 26 Nov 2026 14:35:10 +0100
 Subject: [PATCH] fix(parser): don't take esac for a case pattern
 
 In `(case x in x) echo a;; esac)`, the parser took `esac` for the
@@ -8,16 +8,19 @@ pattern of another case item, ended by the subshell's `)`, and then
 missed the `esac`.  As POSIX's grammar has it (rule 4), a first pattern
 `esac` without a preceding `(` is the reserved word.  Automake's
 install hooks have this form (gzip's remove-installed-links).
+
+Rebased for brush 0.5.0.
+Assisted-by: Codex:GPT-6
 ---
  brush-parser/src/parser/peg.rs                    | 15 +++++++++++----
  .../src/parser/tests/compound_commands.rs         | 15 +++++++++++++++
  2 files changed, 26 insertions(+), 4 deletions(-)
 
 diff --git a/brush-parser/src/parser/peg.rs b/brush-parser/src/parser/peg.rs
-index cd84719b..3b7ab842 100644
+index 0f00152c..f596ea23 100644
 --- a/brush-parser/src/parser/peg.rs
 +++ b/brush-parser/src/parser/peg.rs
-@@ -325,7 +325,7 @@ peg::parser! {
+@@ -343,7 +343,7 @@ peg::parser! {
              }
  
          pub(crate) rule case_item_ns() -> ast::CaseItem =
@@ -26,7 +29,7 @@ index cd84719b..3b7ab842 100644
                  let start = s.map(Token::location).or_else(|| p.first().and_then(|w| w.loc.as_ref()));
                  let end = c.location();
  
-@@ -333,7 +333,7 @@ peg::parser! {
+@@ -351,7 +351,7 @@ peg::parser! {
  
                  ast::CaseItem { patterns: p, cmd: Some(c), post_action: ast::CaseItemPostAction::ExitCase, loc }
              } /
@@ -35,7 +38,7 @@ index cd84719b..3b7ab842 100644
                  let start = s.map(Token::location).or_else(|| p.first().and_then(|w| w.loc.as_ref()));
                  let end = Some(e.location());
  
-@@ -342,19 +342,26 @@ peg::parser! {
+@@ -360,19 +360,26 @@ peg::parser! {
              }
  
          pub(crate) rule case_item() -> ast::CaseItem =
@@ -65,10 +68,10 @@ index cd84719b..3b7ab842 100644
              s:specific_operator(";;") {
                  (ast::CaseItemPostAction::ExitCase, s.location())
 diff --git a/brush-parser/src/parser/tests/compound_commands.rs b/brush-parser/src/parser/tests/compound_commands.rs
-index 78caee36..cbdf65d2 100644
+index fc77d488..a9011491 100644
 --- a/brush-parser/src/parser/tests/compound_commands.rs
 +++ b/brush-parser/src/parser/tests/compound_commands.rs
-@@ -235,6 +235,21 @@ fn parse_case_continue() -> Result<()> {
+@@ -269,6 +269,21 @@ fn parse_case_continue() -> Result<()> {
      Ok(())
  }
  

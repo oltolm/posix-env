@@ -1,6 +1,6 @@
-From 12b44707615366da70a6346e52f28387222b6f37 Mon Sep 17 00:00:00 2001
+From 56ffb7c05c3bf7e45f50d6427c8e4f048c01526c Mon Sep 17 00:00:00 2001
 From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
-Date: Wed, 25 Nov 2026 04:08:56 +0100
+Date: Thu, 26 Nov 2026 14:35:11 +0100
 Subject: [PATCH] feat: source BASH_ENV in non-interactive shells
 
 A non-interactive shell with BASH_ENV set failed at startup with "not
@@ -11,6 +11,9 @@ if that exists; in posix mode, which sh mode implies, it reads no
 startup file, so ENV no longer fails either.
 
 Assisted-by: Claude Code:claude-opus-5-5
+
+Rebased for brush 0.5.0.
+Assisted-by: Codex:GPT-6
 ---
  brush-core/src/shell/initscripts.rs       | 37 ++++++-----
  brush-shell/tests/cases/compat/basic.yaml | 78 +++++++++++++++++++++++
@@ -75,10 +78,10 @@ index 5a65d5c6..c2a301e8 100644
      }
  }
 diff --git a/brush-shell/tests/cases/compat/basic.yaml b/brush-shell/tests/cases/compat/basic.yaml
-index 90030603..eb9d99e8 100644
+index 8a9c7419..153765a5 100644
 --- a/brush-shell/tests/cases/compat/basic.yaml
 +++ b/brush-shell/tests/cases/compat/basic.yaml
-@@ -120,6 +120,84 @@ cases:
+@@ -141,6 +141,84 @@ cases:
      stdin: |
        echo "Executing in main script body"
  
@@ -163,6 +166,3 @@ index 90030603..eb9d99e8 100644
    - name: "Unknown option"
      ignore_stderr: true
      args: ["--unknown-option", "-c", "echo hi"]
--- 
-2.56.1.windows.1
-

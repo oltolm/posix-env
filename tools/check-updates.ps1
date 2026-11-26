@@ -13,10 +13,8 @@ param(
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
-# Recipes made from this repository, and the one deliberately pinned to an
-# unreleased snapshot, have no upstream release version to compare.
+# Local recipes and deliberately pinned versions are not compared upstream.
 $skip = @{
-  brush = 'development snapshot'
   expect = 'posix-env implementation'
   libsystre = 'local compatibility library'
   'posix-env' = 'this repository'

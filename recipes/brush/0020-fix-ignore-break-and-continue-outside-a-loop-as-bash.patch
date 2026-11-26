@@ -1,8 +1,7 @@
-From 4891e4cb1e448956cd1b3d4a704dd96a3cfe4542 Mon Sep 17 00:00:00 2001
+From a45e29ecdb834a8f1d07eae4c0944e532ab59b0f Mon Sep 17 00:00:00 2001
 From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
-Date: Sat, 3 Oct 2026 18:07:24 +0200
-Subject: [PATCH 20/21] fix: ignore break and continue outside a loop, as bash
- does
+Date: Thu, 26 Nov 2026 14:35:10 +0100
+Subject: [PATCH] fix: ignore break and continue outside a loop, as bash does
 
 Outside a loop, `break` and `continue` still returned loop control flow,
 which nothing consumed: a script run from a file stopped there with
@@ -16,37 +15,26 @@ functions and subshells as bash does.  Outside a loop, warn and return
 outermost one.
 
 Assisted-by: Claude Code:claude-opus-5-5
+
+Rebased for brush 0.5.0.
+Assisted-by: Codex:GPT-6
 ---
- brush-builtins/src/break_.rs                  |  17 +-
- brush-builtins/src/continue_.rs               |  17 +-
+ brush-builtins/src/break_.rs                  |  14 +-
+ brush-builtins/src/continue_.rs               |  14 +-
  brush-core/src/commands.rs                    |   3 +
  brush-core/src/interp.rs                      | 247 ++++++++++--------
  brush-core/src/shell.rs                       |  15 ++
  brush-core/src/shell/builder.rs               |   1 +
  .../tests/cases/compat/builtins/break.yaml    |  64 +++++
- 7 files changed, 253 insertions(+), 111 deletions(-)
+ 7 files changed, 249 insertions(+), 109 deletions(-)
  create mode 100644 brush-shell/tests/cases/compat/builtins/break.yaml
 
 diff --git a/brush-builtins/src/break_.rs b/brush-builtins/src/break_.rs
-index d16a0394..255db8ee 100644
+index d6d65479..4902003a 100644
 --- a/brush-builtins/src/break_.rs
 +++ b/brush-builtins/src/break_.rs
-@@ -1,4 +1,5 @@
- use clap::Parser;
-+use std::io::Write;
- 
- use brush_core::{ExecutionControlFlow, ExecutionExitCode, ExecutionResult, builtins};
- 
-@@ -15,18 +16,30 @@ impl builtins::Command for BreakCommand {
- 
-     async fn execute<SE: brush_core::ShellExtensions>(
-         &self,
--        _context: brush_core::ExecutionContext<'_, SE>,
-+        context: brush_core::ExecutionContext<'_, SE>,
-     ) -> Result<brush_core::ExecutionResult, Self::Error> {
-         // If specified, which_loop needs to be positive.
-         if self.which_loop <= 0 {
-             return Ok(ExecutionExitCode::InvalidUsage.into());
+@@ -31,11 +31,23 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for BreakCommand {
+             return Ok(ExecutionResult::general_error());
          }
  
 +        // Like bash, warn and carry on outside a loop.
@@ -71,25 +59,11 @@ index d16a0394..255db8ee 100644
  
          Ok(result)
 diff --git a/brush-builtins/src/continue_.rs b/brush-builtins/src/continue_.rs
-index 8634097a..3febf9ac 100644
+index 94d9ac89..ec0b4dc2 100644
 --- a/brush-builtins/src/continue_.rs
 +++ b/brush-builtins/src/continue_.rs
-@@ -1,4 +1,5 @@
- use clap::Parser;
-+use std::io::Write;
- 
- use brush_core::{ExecutionControlFlow, ExecutionExitCode, ExecutionResult, builtins};
- 
-@@ -15,18 +16,30 @@ impl builtins::Command for ContinueCommand {
- 
-     async fn execute<SE: brush_core::ShellExtensions>(
-         &self,
--        _context: brush_core::ExecutionContext<'_, SE>,
-+        context: brush_core::ExecutionContext<'_, SE>,
-     ) -> Result<brush_core::ExecutionResult, Self::Error> {
-         // If specified, which_loop needs to be positive.
-         if self.which_loop <= 0 {
-             return Ok(ExecutionExitCode::InvalidUsage.into());
+@@ -31,11 +31,23 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for ContinueCommand
+             return Ok(ExecutionResult::general_error());
          }
  
 +        // Like bash, warn and carry on outside a loop.
@@ -114,25 +88,25 @@ index 8634097a..3febf9ac 100644
  
          Ok(result)
 diff --git a/brush-core/src/commands.rs b/brush-core/src/commands.rs
-index 359f1a05..afd3f2c5 100644
+index e9eb51e4..ed9bc96e 100644
 --- a/brush-core/src/commands.rs
 +++ b/brush-core/src/commands.rs
-@@ -817,7 +817,10 @@ pub(crate) async fn invoke_shell_function(
+@@ -846,7 +846,10 @@ pub(crate) async fn invoke_shell_function(
      // so the parameters are passed through by shared reference rather than cloned. This prevents
      // direct mutation of the caller's `ExecutionParameters` open-file table, though the function
      // may still change the shell's persistent open files via builtins (e.g. `exec`).
-+    // As in bash, `break` and `continue` in a function do not reach the caller's loops.
-+    let outer_loop_depth = context.shell.replace_loop_depth(0);
-     let result = body.execute(context.shell, &context.params).await;
-+    context.shell.replace_loop_depth(outer_loop_depth);
++    // Functions do not inherit their caller's enclosing loops.
++    let outer_loop_depth = shell.replace_loop_depth(0);
+     let result = body.execute(&mut shell, &context.params).await;
++    shell.replace_loop_depth(outer_loop_depth);
  
-     // We've come back out, reflect it.
-     context.shell.leave_function()?;
+     // Leave the function: pop its frame and its local variables.
+     drop(shell);
 diff --git a/brush-core/src/interp.rs b/brush-core/src/interp.rs
-index fd7af4c4..06d7e8b0 100644
+index 9a8c58ac..1401c709 100644
 --- a/brush-core/src/interp.rs
 +++ b/brush-core/src/interp.rs
-@@ -827,63 +827,74 @@ impl Execute for ast::ForClauseCommand {
+@@ -845,63 +845,74 @@ impl Execute for ast::ForClauseCommand {
          shell: &mut Shell<impl extensions::ShellExtensions>,
          params: &ExecutionParameters,
      ) -> Result<ExecutionResult, error::Error> {
@@ -255,7 +229,7 @@ index fd7af4c4..06d7e8b0 100644
  }
  
  #[async_trait::async_trait]
-@@ -1018,55 +1029,66 @@ impl Execute for (WhileOrUntil, &ast::WhileOrUntilClauseCommand) {
+@@ -1031,55 +1042,66 @@ impl Execute for (WhileOrUntil, &ast::WhileOrUntilClauseCommand) {
          shell: &mut Shell<impl extensions::ShellExtensions>,
          params: &ExecutionParameters,
      ) -> Result<ExecutionResult, error::Error> {
@@ -358,7 +332,7 @@ index fd7af4c4..06d7e8b0 100644
  }
  
  #[async_trait::async_trait]
-@@ -1096,40 +1118,51 @@ impl Execute for ast::ArithmeticForClauseCommand {
+@@ -1109,40 +1131,51 @@ impl Execute for ast::ArithmeticForClauseCommand {
          shell: &mut Shell<impl extensions::ShellExtensions>,
          params: &ExecutionParameters,
      ) -> Result<ExecutionResult, error::Error> {
@@ -434,12 +408,12 @@ index fd7af4c4..06d7e8b0 100644
  
  #[async_trait::async_trait]
 diff --git a/brush-core/src/shell.rs b/brush-core/src/shell.rs
-index bca769d5..65d075fd 100644
+index 80f7514e..e50fe7e2 100644
 --- a/brush-core/src/shell.rs
 +++ b/brush-core/src/shell.rs
-@@ -101,6 +101,9 @@ pub struct Shell<SE: extensions::ShellExtensions = extensions::DefaultShellExten
-     /// Clone depth from the original ancestor shell.
-     depth: usize,
+@@ -117,6 +117,9 @@ pub struct Shell<SE: extensions::ShellExtensions = extensions::DefaultShellExten
+     /// interactive loop has run.
+     command_number: usize,
  
 +    /// Number of loops enclosing the current command; functions and subshells start at 0.
 +    loop_depth: usize,
@@ -447,15 +421,15 @@ index bca769d5..65d075fd 100644
      /// Shell name
      name: Option<String>,
  
-@@ -184,6 +187,7 @@ impl<SE: extensions::ShellExtensions> Clone for Shell<SE> {
-             key_bindings: self.key_bindings.clone(),
+@@ -207,6 +210,7 @@ impl<SE: extensions::ShellExtensions> Clone for Shell<SE> {
              history: self.history.clone(),
              depth: self.depth + 1,
+             command_number: self.command_number,
 +            loop_depth: 0,
          }
      }
  }
-@@ -260,6 +264,17 @@ impl<SE: extensions::ShellExtensions> Shell<SE> {
+@@ -286,6 +290,17 @@ impl<SE: extensions::ShellExtensions> Shell<SE> {
  }
  
  impl<SE: extensions::ShellExtensions> Shell<SE> {
@@ -471,16 +445,16 @@ index bca769d5..65d075fd 100644
 +    }
 +
      /// Increments the interactive line offset in the shell by the indicated number
-     /// of lines.
-     ///
+     /// of lines. The interactive loop calls this once after each command it runs, so
+     /// it also advances the command number that the `\#` prompt escape shows.
 diff --git a/brush-core/src/shell/builder.rs b/brush-core/src/shell/builder.rs
-index 52203a33..5486d919 100644
+index 6b3bcdc2..1288ea22 100644
 --- a/brush-core/src/shell/builder.rs
 +++ b/brush-core/src/shell/builder.rs
-@@ -252,6 +252,7 @@ impl<SE: extensions::ShellExtensions> Default for Shell<SE> {
-             last_exit_status_change_count: 0,
+@@ -267,6 +267,7 @@ impl<SE: extensions::ShellExtensions> Default for Shell<SE> {
              last_pipeline_statuses: vec![0],
              depth: 0,
+             command_number: 1,
 +            loop_depth: 0,
              name: None,
              args: vec![],

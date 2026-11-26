@@ -1,4 +1,6 @@
+From c39215ce2ca4b0816fbf36d0b1185340c73c5c36 Mon Sep 17 00:00:00 2001
 From: Oleg Tolmatcev <oleg.tolmatcev@gmail.com>
+Date: Thu, 26 Nov 2026 14:35:11 +0100
 Subject: [PATCH] feat(windows): report CPU time in time and times
 
 On Windows the time keyword and the times builtin always reported zero
@@ -10,6 +12,9 @@ and exited processes included; the shell's own time since joining is
 subtracted.  Children may still break away from the job.
 
 Assisted-by: Claude Code:claude-opus-5-5
+
+Rebased for brush 0.5.0.
+Assisted-by: Codex:GPT-6
 ---
  Cargo.lock                             |   1 +
  brush-core/Cargo.toml                  |   6 +
@@ -20,9 +25,10 @@ Assisted-by: Claude Code:claude-opus-5-5
  create mode 100644 brush-core/src/sys/windows/resource.rs
 
 diff --git a/Cargo.lock b/Cargo.lock
+index de960d4f..17f90603 100644
 --- a/Cargo.lock
 +++ b/Cargo.lock
-@@ -438,6 +438,7 @@ dependencies = [
+@@ -468,6 +468,7 @@ dependencies = [
   "uzers",
   "whoami",
   "winapi-util",
@@ -31,10 +37,11 @@ diff --git a/Cargo.lock b/Cargo.lock
  
  [[package]]
 diff --git a/brush-core/Cargo.toml b/brush-core/Cargo.toml
+index 8912c520..053223a1 100644
 --- a/brush-core/Cargo.toml
 +++ b/brush-core/Cargo.toml
-@@ -64,6 +64,12 @@ tokio = { version = "1.52.3", features = [
- check_elevation = "0.2.7"
+@@ -63,6 +63,12 @@ tokio = { version = "1.52.3", features = [
+ check_elevation = "0.3.0"
  whoami = "2.1.1"
  winapi-util = "0.1.11"
 +windows-sys = { version = "0.61.2", features = [
@@ -47,21 +54,23 @@ diff --git a/brush-core/Cargo.toml b/brush-core/Cargo.toml
  [target.'cfg(unix)'.dependencies]
  command-fds = "0.3.2"
 diff --git a/brush-core/src/sys/tokio_process.rs b/brush-core/src/sys/tokio_process.rs
+index 64da85e7..caad6783 100644
 --- a/brush-core/src/sys/tokio_process.rs
 +++ b/brush-core/src/sys/tokio_process.rs
-@@ -5,6 +5,8 @@ pub(crate) use tokio::process::Child;
- 
- // `kill_on_drop`: see `CreateOptions::kill_external_commands_on_drop` (false for ordinary shells).
- pub(crate) fn spawn(command: std::process::Command, kill_on_drop: bool) -> std::io::Result<Child> {
+@@ -19,6 +19,8 @@ pub(crate) type ProcessId = i32;
+ ///
+ /// * `command` - The process to start.
+ pub(crate) fn spawn(command: LaunchRequest) -> std::io::Result<ChildProcess> {
 +    #[cfg(windows)]
 +    crate::sys::resource::join_job();
-     let mut command = tokio::process::Command::from(command);
-     command.kill_on_drop(kill_on_drop);
-     command.spawn()
+     let process_group = command.process_group;
+     // See `CreateOptions::kill_external_commands_on_drop` (false for ordinary shells).
+     let kill_on_drop = command.kill_on_drop;
 diff --git a/brush-core/src/sys/windows.rs b/brush-core/src/sys/windows.rs
+index 0406ce0d..fe06377d 100644
 --- a/brush-core/src/sys/windows.rs
 +++ b/brush-core/src/sys/windows.rs
-@@ -6,7 +6,7 @@ pub(crate) mod fs;
+@@ -7,7 +7,7 @@ pub(crate) use crate::sys::os_pipes as pipes;
  pub use crate::sys::stubs::input;
  pub(crate) mod network;
  pub use crate::sys::stubs::poll;
@@ -72,6 +81,7 @@ diff --git a/brush-core/src/sys/windows.rs b/brush-core/src/sys/windows.rs
  pub mod signal {
 diff --git a/brush-core/src/sys/windows/resource.rs b/brush-core/src/sys/windows/resource.rs
 new file mode 100644
+index 00000000..74a81245
 --- /dev/null
 +++ b/brush-core/src/sys/windows/resource.rs
 @@ -0,0 +1,164 @@
